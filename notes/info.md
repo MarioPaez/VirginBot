@@ -1,7 +1,7 @@
 # Interest URLs
 
 ## Login
-https://shop.virginactive.it/account/login
+Para el login, tenemos que irnos a la siguiente URL https://shop.virginactive.it/account/login y realizar un login manual con la herramienta de desarrolladores e ir a la ventana de Network y activar la opción de Preserve log ya que al hacer el login cambia de página y no veremos las peticiones que hace. El objetivo es ver la petición que hace al servidor y qué datos debemos mandar.
 
 ## Classes
 
