@@ -1,75 +1,154 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"net/http"
-	"net/http/cookiejar"
-	"io"
-	"net/url"
-	"regexp"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
+type BookClassResponse struct {
+	BookClassResult struct {
+		Data          string `json:"Data"`
+		ErrorMessage  string `json:"ErrorMessage"`
+		StatusCode    int    `json:"StatusCode"`
+		StatusMessage string `json:"StatusMessage"`
+	} `json:"BookClassResult"`
+}
+
 func main() {
-	// Crear un cliente HTTP con almacenamiento de cookies
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar}
 
-	// URL de la página de login
-	loginPageURL := "https://shop.virginactive.it/account/login"
-	fmt.Println("URL de la página de login:", loginPageURL)
-	// 1️⃣ Obtener el _csrf_token desde la página de login
-	resp, err := client.Get(loginPageURL)
-	if err != nil {
-		fmt.Println("Error al obtener la página de login:", err)
-		return
-	}
-	defer resp.Body.Close()
-	
-	// Leer el contenido de la respuesta
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println("Error al leer la respuesta:", err)
-		return
-	}
-	// Buscar el token CSRF en el HTML usando una expresión regular
-	csrfRegex := regexp.MustCompile(`<input type="hidden" name="_csrf_token" value="(.*?)">`)
-	matches := csrfRegex.FindStringSubmatch(string(body))
-	if len(matches) < 2 {
-		fmt.Println("No se encontró el token CSRF")
-		return
-	}
-	csrfToken := matches[1]
-	fmt.Println("CSRF Token encontrado:", csrfToken)
-
-	// 2️⃣ Enviar la petición POST con el login
-	loginURL := "https://shop.virginactive.it/account/login"
-	// Acceder a las variables
+	// Obtener credenciales
 	email := os.Getenv("VA_EMAIL")
 	password := os.Getenv("VA_PASS")
+	fmt.Print("Email: ", email, "\n")
+	fmt.Print("Password: ", password, "\n")
+	loginUrl := "https://shop.virginactive.it/account/login"
+	// subscriptionsUrl := "https://shop.virginactive.it/account/subscriptions"
 
-	data := url.Values{
-		"_csrf_token": {csrfToken},
-		"username":    {email},
-		"password":    {password},
-		"login":       {"Accedo"}, // Esto puede ser opcional, pero algunas webs lo requieren
-	}
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", false),       // false = mostrar navegador
+		chromedp.Flag("start-maximized", true), // opcional: maximizar ventana
+	)
 
-	req, _ := http.NewRequest("POST", loginURL, strings.NewReader(data.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", loginPageURL) // Algunas webs requieren este header
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
 
-	resp, err = client.Do(req)
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	var currentURL string
+
+	err := chromedp.Run(ctx,
+		// Navegar a la página de login
+		chromedp.Navigate(loginUrl),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Navegando a la página de login")
+			return nil
+		}),
+		// Esperar y aceptar el diálogo de cookies
+		chromedp.WaitVisible(`button.iubenda-cs-accept-btn.iubenda-cs-btn-primary[role="button"]`),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Dialog de cookies encontrado")
+			// Debug: verificar si el botón existe
+			var exists bool
+			if err := chromedp.Evaluate(`!!document.querySelector('button.iubenda-cs-accept-btn.iubenda-cs-btn-primary')`, &exists).Do(ctx); err != nil {
+				return err
+			}
+			fmt.Printf("¿Existe el botón de aceptar? %v\n", exists)
+			return nil
+		}),
+		chromedp.Click(`button.iubenda-cs-accept-btn.iubenda-cs-btn-primary`),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Cookies aceptadas")
+			return nil
+		}),
+
+		// Verificar que el diálogo se ha cerrado
+		chromedp.WaitNotPresent(`button.iubenda-cs-accept-btn.iubenda-cs-btn-primary`),
+
+		// Esperar a que los campos estén disponibles
+		chromedp.WaitVisible(`input[name="username"]`),
+		chromedp.WaitVisible(`input[name="password"]`),
+		// Rellenar el formulario
+		chromedp.SendKeys(`input[name="username"]`, email),
+		chromedp.SendKeys(`input[name="password"]`, password),
+		// Hacer clic en el botón de login
+		chromedp.Click(`button[name="login"]`),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Click en botón login realizado")
+			return nil
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Esperando al botón de calendario...")
+			return nil
+		}),
+		// Esperar a que el botón del calendario esté visible
+		chromedp.WaitVisible(`a.subscription-go-to-courses.btn.btn-primary`),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Botón de calendario encontrado")
+			return nil
+		}),
+		// Intentar hacer click usando JavaScript
+		chromedp.Evaluate(`
+			const btn = document.querySelector('a.subscription-go-to-courses.btn.btn-primary');
+			if (btn) {
+				btn.click();
+				console.log('Click ejecutado via JavaScript');
+			} else {
+				console.log('Botón no encontrado');
+			}
+		`, nil),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			fmt.Println("✅ Intento de click realizado")
+			return nil
+		}),
+		// Esperar un momento para ver si la navegación comienza
+		chromedp.Sleep(80*time.Second),
+
+		// Verificar si hay mensajes de error
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var errorVisible bool
+			if err := chromedp.Evaluate(`!!document.querySelector('.error-message, .alert-danger')`, &errorVisible).Do(ctx); err != nil {
+				return err
+			}
+			if errorVisible {
+				var errorText string
+				if err := chromedp.Text(`.error-message, .alert-danger`, &errorText).Do(ctx); err != nil {
+					return err
+				}
+				fmt.Printf("❌ Error de login detectado: %s\n", errorText)
+			}
+			return nil
+		}),
+
+		// Esperar y monitorear la redirección
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			for i := 0; i < 50; i++ { // 15 intentos, 1 segundo cada uno
+				var url string
+				if err := chromedp.Location(&url).Do(ctx); err != nil {
+					return err
+				}
+				fmt.Printf("📍 URL actual (%d): %s\n", i+1, url)
+
+				if strings.Contains(url, "/account/subscriptions") {
+					fmt.Println("✅ Redirección exitosa a subscriptions")
+					return nil
+				}
+				time.Sleep(1 * time.Second)
+			}
+			return fmt.Errorf("❌ Timeout esperando redirección")
+		}),
+	)
+
 	if err != nil {
-		fmt.Println("Error al enviar login:", err)
+		fmt.Println("Error:", err)
 		return
 	}
-	defer resp.Body.Close()
 
-	// 3️⃣ Verificar si se guardaron cookies
-	fmt.Println("Cookies guardadas tras el login:")
-	for _, cookie := range jar.Cookies(req.URL) {
-		fmt.Println(cookie.Name, ":", cookie.Value)
-	}
+	fmt.Println("URL actual:", currentURL)
+	fmt.Println("Error:", err)
 }
