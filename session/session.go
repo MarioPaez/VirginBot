@@ -48,7 +48,7 @@ func DoLogin() {
 // pass
 // <input type="password" name="password" ng:model="password" required="required">
 //"C:\Program Files\Google\Chrome\Application\chrome.exe"
-//Espero este div al iniciar sesión:
+//Wait after sign in
 /*
 <div class="card-title">
                         Gestione di abbonamenti
