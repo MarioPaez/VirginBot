@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
+	"github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/overlay"
 	"github.com/chromedp/chromedp"
 )
 
@@ -13,15 +16,22 @@ const (
 	URL_LOGIN   = "https://shop.virginactive.it/account/login"
 	USER        = "VA_EMAIL"
 	PASS        = "VA_PASS"
-	CHROME_PATH = "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"
+	CHROME_PATH = `/mnt/c/Program Files/Google/Chrome/Application/`
 )
 
 func DoLogin() {
 	user := os.Getenv(USER)
 	pass := os.Getenv(PASS)
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath(CHROME_PATH),
-		chromedp.Headless,
+		chromedp.ExecPath("/usr/bin/google-chrome-stable"), // o donde esté tu chrome
+		chromedp.Flag("headless", false),                   // esencial
+		chromedp.Flag("disable-gpu", true),                 // evita errores en WSL
+		chromedp.Flag("no-sandbox", true),                  // necesario si WSL no permite sandbox
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("ignore-certificate-errors", true),
+		chromedp.Flag("use-fake-ui-for-media-stream", true),
+		chromedp.Flag("block-new-web-contents", true),
+		chromedp.Flag("disable-notifications", true),
 	)
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -32,25 +42,20 @@ func DoLogin() {
 
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(URL_LOGIN),
+		chromedp.Sleep(1*time.Second), // esperar a que aparezca el popup
+		// Hacer click en "Rifiuta" para rechazar cookies
+		chromedp.Click(`button.iubenda-cs-reject-btn.iubenda-cs-btn-primary`, chromedp.NodeVisible),
 		chromedp.WaitVisible(`input[name="username"]`),
 		chromedp.SendKeys(`input[name="username"]`, user),
 		chromedp.SendKeys(`input[name="password"]`, pass),
-		chromedp.Click(`button[type="submit"]`),
-		chromedp.WaitVisible(`div.card-title`),
+		chromedp.Click(`button.vrgnBtn.vrgnBtnRight.vrgnBtnRight-flexend[name="login"]`, chromedp.NodeVisible),
+		chromedp.Click(`subscription-go-to-courses btn btn-primary mt-4`, chromedp.NodeVisible),
+		browser.GrantPermissions([]browser.PermissionType{browser.PermissionTypeGeolocation}),
+		overlay.Disable(),
+		chromedp.Click(`iubenda-cs-accept-btn iubenda-cs-btn-primary`, chromedp.NodeVisible),
+		chromedp.Sleep(120*time.Second),
 	); err != nil {
 		log.Fatal("error trying during the sign in\n", err)
 	}
 	fmt.Println("signed in")
 }
-
-// Email
-// <input type="text" name="username" ng-required="true" ng-model="email" pattern="^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$" value="">
-// pass
-// <input type="password" name="password" ng:model="password" required="required">
-//"C:\Program Files\Google\Chrome\Application\chrome.exe"
-//Wait after sign in
-/*
-<div class="card-title">
-                        Gestione di abbonamenti
-                    </div>
-*/
