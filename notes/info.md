@@ -26,3 +26,13 @@ First, we must to login and manage our cookie session.
 We must to save our credentials in enviroment variables with this name:
 VA_EMAIL: {yourmail@gmail.com}
 VA_PASS: {yourpassword}
+
+## Html information
+
+- Email: <input type="text" name="username" ng-required="true" ng-model="email" pattern="^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$" value="">
+- Pass:  <input type="password" name="password" ng:model="password" required="required">
+- Refuse cookies: <button class="iubenda-cs-reject-btn iubenda-cs-btn-primary" tabindex="0" role="button">Rifiuta</button>
+- Sign in button: <button type="submit" name="login" class="vrgnBtn vrgnBtnRight vrgnBtnRight-flexend" ng-disabled=""> Accedo </button>
+- Calendario corsi button: <a target="_blank" class="subscription-go-to-courses btn btn-primary mt-4" href="https:" role="button">Calendario corsi</a>
+- Cookies button in calendar page: <button class="iubenda-cs-accept-btn iubenda-cs-btn-primary" tabindex="0" role="button">Accetta</button>
+

@@ -3,5 +3,6 @@ package main
 import "github.com/MarioPaez/VirginBot/session"
 
 func main() {
-	session.DoLogin()
+	ctx := session.DoLogin()
+	session.FindClasses(ctx)
 }
