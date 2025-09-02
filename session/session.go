@@ -19,21 +19,11 @@ const (
 	CHROME_PATH  = `/mnt/c/Program Files/Google/Chrome/Application/`
 )
 
-func DoLogin() context.Context {
+func DoLogin() {
 	user := os.Getenv(USER)
 	pass := os.Getenv(PASS)
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath("/usr/bin/google-chrome-stable"), // o donde esté tu chrome
-		chromedp.Flag("headless", false),                   // esencial
-		//chromedp.Flag("disable-gpu", true),                                              // evita errores en WSL
-		//chromedp.Flag("no-sandbox", true),                                               // necesario si WSL no permite sandbox
-		//chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("ignore-certificate-errors", true),
-		//chromedp.Flag("use-fake-ui-for-media-stream", true),
-		//chromedp.Flag("block-new-web-contents", true), es para forzar no nuevos tabs
-		//chromedp.Flag("disable-notifications", true),
-		chromedp.Flag("disable-features", "Translate"),
-	)
+
+	opts := defineOpts()
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
@@ -43,27 +33,32 @@ func DoLogin() context.Context {
 
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(URL_LOGIN),
-		chromedp.Sleep(1*time.Second), // esperar a que aparezca el popup
-		// Hacer click en "Rifiuta" para rechazar cookies
-		chromedp.Click(`button.iubenda-cs-reject-btn.iubenda-cs-btn-primary`, chromedp.NodeVisible),
+		chromedp.Sleep(1*time.Second), //wait popup
+		chromedp.Click(`button.iubenda-cs-reject-btn.iubenda-cs-btn-primary`, chromedp.NodeVisible), //refuse cookies
 		chromedp.WaitVisible(`input[name="username"]`),
 		chromedp.SendKeys(`input[name="username"]`, user),
 		chromedp.SendKeys(`input[name="password"]`, pass),
-		chromedp.Click(`button.vrgnBtn.vrgnBtnRight.vrgnBtnRight-flexend[name="login"]`, chromedp.NodeVisible),
-		chromedp.Click(`subscription-go-to-courses btn btn-primary mt-4`, chromedp.NodeVisible),
-		// browser.GrantPermissions([]browser.PermissionType{browser.PermissionTypeGeolocation}),
-		// chromedp.Click(`iubenda-cs-accept-btn iubenda-cs-btn-primary`, chromedp.NodeVisible),
-		// chromedp.Sleep(120*time.Second),
+		chromedp.Click(`button.vrgnBtn.vrgnBtnRight.vrgnBtnRight-flexend[name="login"]`, chromedp.NodeVisible), //sign in
+		chromedp.Click(`subscription-go-to-courses btn btn-primary mt-4`, chromedp.NodeVisible),                //Go course page
 	); err != nil {
 		log.Fatal("error trying during the sign in\n", err)
 	}
 	fmt.Println("signed in")
-	return ctx
+	FindClasses(ctx)
+}
+
+func defineOpts() []chromedp.ExecAllocatorOption {
+	return append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath("/usr/bin/google-chrome-stable"),
+		chromedp.Flag("headless", false),
+		chromedp.Flag("ignore-certificate-errors", true),
+		chromedp.Flag("block-new-web-contents", true),
+		chromedp.Flag("disable-features", "Translate,TranslateUI"),
+	)
 }
 
 func FindClasses(ctx context.Context) {
 	if err := chromedp.Run(ctx,
-		chromedp.Navigate(URL_CALENDAR),
 		browser.GrantPermissions([]browser.PermissionType{browser.PermissionTypeGeolocation}),
 		chromedp.Click(`iubenda-cs-accept-btn iubenda-cs-btn-primary`, chromedp.NodeVisible),
 		chromedp.Sleep(120*time.Second),
