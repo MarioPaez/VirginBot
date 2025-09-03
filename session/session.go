@@ -28,7 +28,8 @@ func DoLogin() {
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	ctx, cancel := chromedp.NewContext(allocCtx) // chromedp.WithDebugf(log.Printf)
+
 	defer cancel()
 
 	if err := chromedp.Run(ctx,
@@ -43,17 +44,18 @@ func DoLogin() {
 	); err != nil {
 		log.Fatal("error trying during the sign in\n", err)
 	}
-	fmt.Println("signed in")
+	fmt.Println("sign in successfully")
 	FindClasses(ctx)
 }
 
 func defineOpts() []chromedp.ExecAllocatorOption {
 	return append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath("/usr/bin/google-chrome-stable"),
+		chromedp.ExecPath("/usr/bin/google-chrome"),
 		chromedp.Flag("headless", false),
 		chromedp.Flag("ignore-certificate-errors", true),
 		chromedp.Flag("block-new-web-contents", true),
 		chromedp.Flag("disable-features", "Translate,TranslateUI"),
+		chromedp.Flag("translate_script_url", ""),
 	)
 }
 
