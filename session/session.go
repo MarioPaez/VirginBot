@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 )
 
@@ -28,10 +29,10 @@ func DoLogin() {
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	ctx, cancel := chromedp.NewContext(allocCtx) // chromedp.WithDebugf(log.Printf)
-
+	ctx, cancel := chromedp.NewContext(allocCtx) //, chromedp.WithDebugf(log.Printf)
 	defer cancel()
-
+	var href string
+	var cookies []*network.Cookie
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(URL_LOGIN),
 		chromedp.Sleep(1*time.Second), //wait popup
@@ -40,12 +41,54 @@ func DoLogin() {
 		chromedp.SendKeys(`input[name="username"]`, user),
 		chromedp.SendKeys(`input[name="password"]`, pass),
 		chromedp.Click(`button.vrgnBtn.vrgnBtnRight.vrgnBtnRight-flexend[name="login"]`, chromedp.NodeVisible), //sign in
-		chromedp.Click(`subscription-go-to-courses btn btn-primary mt-4`, chromedp.NodeVisible),                //Go course page
+		getUrlLogin(&href),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			// obtener todas las cookies de la sesión actual
+			var err error
+			cookies, err = network.GetCookies().Do(ctx)
+			return err
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			log.Println("URL capturada:", href)
+			return nil
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			for _, c := range cookies {
+				_ = network.SetCookie(c.Name, c.Value).
+					WithDomain(c.Domain).
+					WithPath(c.Path).
+					WithHTTPOnly(c.HTTPOnly).
+					WithSecure(c.Secure).
+					Do(ctx)
+			}
+			return nil
+		}),
+		browser.GrantPermissions([]browser.PermissionType{browser.PermissionTypeGeolocation}),
+		chromedp.Navigate("https://www.virginactive.it/calendario-corsi"),
+		chromedp.Click(`iubenda-cs-accept-btn iubenda-cs-btn-primary`, chromedp.NodeVisible),
+		chromedp.Sleep(120*time.Second),
+		//chromedp.Click(`subscription-go-to-courses btn btn-primary mt-4`, chromedp.NodeVisible),                //Go course page
 	); err != nil {
 		log.Fatal("error trying during the sign in\n", err)
 	}
 	fmt.Println("sign in successfully")
-	FindClasses(ctx)
+	//FindClasses(ctx)
+}
+
+func getCookies(href *string) chromedp.QueryAction {
+	return chromedp.AttributeValue(
+		`subscription-go-to-courses btn btn-primary mt-4`,
+		"href",
+		href,
+		nil)
+}
+
+func getUrlLogin(href *string) chromedp.QueryAction {
+	return chromedp.AttributeValue(
+		`subscription-go-to-courses btn btn-primary mt-4`,
+		"href",
+		href,
+		nil)
 }
 
 func defineOpts() []chromedp.ExecAllocatorOption {
@@ -54,7 +97,7 @@ func defineOpts() []chromedp.ExecAllocatorOption {
 		chromedp.Flag("headless", false),
 		chromedp.Flag("ignore-certificate-errors", true),
 		chromedp.Flag("block-new-web-contents", true),
-		chromedp.Flag("disable-features", "Translate,TranslateUI"),
+		chromedp.Flag("disable-features", "site-per-process,Translate,BlinkGenPropertyTrees"),
 		chromedp.Flag("translate_script_url", ""),
 	)
 }
