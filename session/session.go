@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/browser"
-	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 )
 
@@ -31,8 +30,8 @@ func DoLogin() {
 
 	ctx, cancel := chromedp.NewContext(allocCtx) //, chromedp.WithDebugf(log.Printf)
 	defer cancel()
-	var href string
-	var cookies []*network.Cookie
+	//var href string
+	//var cookies []*network.Cookie
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(URL_LOGIN),
 		chromedp.Sleep(1*time.Second), //wait popup
@@ -41,30 +40,30 @@ func DoLogin() {
 		chromedp.SendKeys(`input[name="username"]`, user),
 		chromedp.SendKeys(`input[name="password"]`, pass),
 		chromedp.Click(`button.vrgnBtn.vrgnBtnRight.vrgnBtnRight-flexend[name="login"]`, chromedp.NodeVisible), //sign in
-		getUrlLogin(&href),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			// obtener todas las cookies de la sesión actual
-			var err error
-			cookies, err = network.GetCookies().Do(ctx)
-			return err
-		}),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			log.Println("URL capturada:", href)
-			return nil
-		}),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			for _, c := range cookies {
-				_ = network.SetCookie(c.Name, c.Value).
-					WithDomain(c.Domain).
-					WithPath(c.Path).
-					WithHTTPOnly(c.HTTPOnly).
-					WithSecure(c.Secure).
-					Do(ctx)
-			}
-			return nil
-		}),
-		browser.GrantPermissions([]browser.PermissionType{browser.PermissionTypeGeolocation}),
+		//getUrlLogin(&href),
+		// chromedp.ActionFunc(func(ctx context.Context) error {
+		// 	// obtener todas las cookies de la sesión actual
+		// 	var err error
+		// 	cookies, err = network.GetCookies().Do(ctx)
+		// 	return err
+		// }),
+		// // chromedp.ActionFunc(func(ctx context.Context) error {
+		// // 	log.Println("URL capturada:", href)
+		// // 	return nil
+		// // }),
+		// chromedp.ActionFunc(func(ctx context.Context) error {
+		// 	for _, c := range cookies {
+		// 		_ = network.SetCookie(c.Name, c.Value).
+		// 			WithDomain(c.Domain).
+		// 			WithPath(c.Path).
+		// 			WithHTTPOnly(c.HTTPOnly).
+		// 			WithSecure(c.Secure).
+		// 			Do(ctx)
+		// 	}
+		// 	return nil
+		// }),
 		chromedp.Navigate("https://www.virginactive.it/calendario-corsi"),
+		browser.GrantPermissions([]browser.PermissionType{browser.PermissionTypeGeolocation}),
 		chromedp.Click(`iubenda-cs-accept-btn iubenda-cs-btn-primary`, chromedp.NodeVisible),
 		chromedp.Sleep(120*time.Second),
 		//chromedp.Click(`subscription-go-to-courses btn btn-primary mt-4`, chromedp.NodeVisible),                //Go course page
