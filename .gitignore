@@ -1,0 +1,6 @@
+# Binarios compilados
+/virginbot
+
+# Entorno
+.env
+automations.json

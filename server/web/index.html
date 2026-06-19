@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VirginBot · Calendario corsi</title>
+<style>
+  :root { --red:#e2231a; --green:#1faa59; --bg:#0f1115; --card:#1a1d24; --muted:#8b93a1; --line:#2a2e38; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:#e9ecf1; }
+  header { padding:18px 24px 0; border-bottom:1px solid var(--line); }
+  .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; font-weight:700; }
+  h1 span { color:var(--red); }
+  .meta { color:var(--muted); font-size:13px; margin-left:auto; }
+  .tabs { display:flex; gap:4px; margin-top:14px; }
+  .tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted);
+         padding:8px 14px; cursor:pointer; font-size:14px; }
+  .tab.active { color:#fff; border-bottom-color:var(--red); }
+  .controls { display:flex; gap:16px; flex-wrap:wrap; padding:16px 24px; align-items:center; }
+  .chipgroup { display:flex; align-items:center; gap:8px; }
+  .grouplabel { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:999px;
+          padding:6px 14px; cursor:pointer; font-size:13px; }
+  .chip:hover { border-color:var(--muted); }
+  .chip.active { background:var(--red); border-color:var(--red); color:#fff; }
+  main { padding:0 24px 64px; }
+  .day { margin-top:24px; }
+  .day h2 { font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+            border-bottom:1px solid var(--line); padding-bottom:6px; margin:0 0 8px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  tr:hover td { background:#191c22; }
+  tr.booked td { background:rgba(31,170,89,.08); }
+  .time { font-variant-numeric:tabular-nums; color:#fff; font-weight:600; white-space:nowrap; width:120px; }
+  .name { font-weight:600; }
+  .club, .studio { color:var(--muted); white-space:nowrap; }
+  .actions { text-align:right; white-space:nowrap; }
+  .btn { border:1px solid var(--line); background:var(--card); color:#e9ecf1; border-radius:8px;
+         padding:5px 12px; cursor:pointer; font-size:13px; }
+  .btn:hover { border-color:var(--muted); }
+  .btn[disabled] { opacity:.4; cursor:not-allowed; }
+  .btn-book { border-color:var(--red); color:#fff; }
+  .btn-cancel { border-color:var(--red); color:var(--red); }
+  .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--card); border:1px solid var(--line); color:var(--muted); }
+  .badge.ok { background:rgba(31,170,89,.15); border-color:var(--green); color:#7fe0a8; }
+  .auto { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; cursor:pointer; user-select:none; }
+  .auto input { accent-color:var(--red); cursor:pointer; }
+  .empty, .loading { color:var(--muted); padding:40px 0; text-align:center; }
+  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--card);
+           border:1px solid var(--line); padding:12px 18px; border-radius:10px; opacity:0; transition:opacity .2s;
+           pointer-events:none; max-width:80vw; }
+  #toast.show { opacity:1; }
+  #toast.err { border-color:var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>Virgin<span>Bot</span> · Calendario corsi</h1>
+    <div class="meta" id="meta"></div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-view="calendar">Calendario</button>
+    <button class="tab" data-view="bookings">Mis reservas</button>
+    <button class="tab" data-view="automations">Automatizaciones</button>
+  </div>
+</header>
+
+<div class="controls" id="controls">
+  <div class="chipgroup">
+    <span class="grouplabel">Clase</span>
+    <div class="chips" id="classChips" data-key="q">
+      <button class="chip active" data-val="">Todas</button>
+      <button class="chip" data-val="calisthenics">Calisthenics</button>
+      <button class="chip" data-val="solarium">Solarium</button>
+    </div>
+  </div>
+  <div class="chipgroup">
+    <span class="grouplabel">Club</span>
+    <div class="chips" id="clubChips" data-key="club">
+      <button class="chip active" data-val="">Todos</button>
+    </div>
+  </div>
+</div>
+
+<main id="out"><div class="loading">Preparando el calendario…</div></main>
+<div id="toast"></div>
+
+<script>
+const DAYS = 10;
+const weekdays = ["Domenica","Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato"];
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let all = [], autos = [], loadToken = 0;
+const state = { q: "", club: "", view: "calendar" };
+
+const weekdayOf = date => new Date(date + "T00:00:00").getDay();
+const ruleFor = c => autos.find(r =>
+  r.name === c.name && r.club === c.club && r.start === c.start && r.weekday === weekdayOf(c.date));
+
+function toast(msg, isErr) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = "show" + (isErr ? " err" : "");
+  setTimeout(() => t.className = "", 3500);
+}
+
+async function waitReady(token) {
+  const t0 = Date.now();
+  for (;;) {
+    const s = await (await fetch(`/api/status?days=${DAYS}`)).json();
+    if (token !== loadToken) return false;
+    if (s.ready) return true;
+    $("#out").innerHTML = `<div class="loading">Preparando el calendario… ${Math.round((Date.now()-t0)/1000)}s` +
+      `<br><small>La primera carga puede tardar hasta ~1 min.</small></div>`;
+    await sleep(2000);
+  }
+}
+
+async function load() {
+  const token = ++loadToken;
+  try {
+    if (!await waitReady(token)) return;
+    const [data, a] = await Promise.all([
+      (await fetch(`/api/classes?days=${DAYS}`)).json(),
+      (await fetch(`/api/automations`)).json(),
+    ]);
+    if (token !== loadToken) return;
+    all = data.classes || [];
+    autos = a || [];
+    populateClubChips(all);
+    const t = new Date(data.fetchedAt).toLocaleTimeString("it-IT");
+    $("#meta").textContent = `${all.length} clases · próximos ${DAYS} días · ${t}`;
+    render();
+  } catch (e) {
+    $("#out").innerHTML = `<div class="empty">Error cargando datos: ${e}</div>`;
+  }
+}
+
+function populateClubChips(list) {
+  const clubs = [...new Set(list.map(c => c.club))].sort();
+  $("#clubChips").innerHTML =
+    `<button class="chip${state.club===""?" active":""}" data-val="">Todos</button>` +
+    clubs.map(c => `<button class="chip${state.club===c?" active":""}" data-val="${c}">${c.replace(/^Milano\s+/i,"")}</button>`).join("");
+}
+
+function render() {
+  $("#controls").style.display = state.view === "calendar" ? "flex" : "none";
+  if (state.view === "automations") return renderAutomations();
+  const rows = (state.view === "bookings")
+    ? all.filter(c => c.booked)
+    : all.filter(c => (!state.q || c.name.toLowerCase().includes(state.q)) && (!state.club || c.club === state.club));
+  renderClasses(rows, state.view === "bookings");
+}
+
+function classRow(c) {
+  const rule = ruleFor(c);
+  const action = c.booked
+    ? `<button class="btn btn-cancel" onclick='act("unbook",${JSON.stringify(c)})'>Cancelar</button>`
+    : (c.bookingId > 0
+        ? `<button class="btn btn-book" onclick='act("book",${JSON.stringify(c)})'>Reservar</button>`
+        : `<span class="badge">no disp.</span>`);
+  const auto = `<label class="auto"><input type="checkbox" ${rule?"checked":""}
+        onchange='toggleAuto(${JSON.stringify(c)}, this.checked)'>auto</label>`;
+  return `<tr class="${c.booked?"booked":""}">
+    <td class="time">${c.start}–${c.end}</td>
+    <td class="name">${c.name}${c.booked?' <span class="badge ok">reservada</span>':''}</td>
+    <td class="club">${c.club}</td>
+    <td class="actions">${auto} &nbsp; ${action}</td>
+  </tr>`;
+}
+
+function renderClasses(rows, isBookings) {
+  if (!rows.length) {
+    $("#out").innerHTML = `<div class="empty">${isBookings?"No tienes reservas en los próximos días.":"Sin clases con esos filtros."}</div>`;
+    return;
+  }
+  const byDay = {};
+  for (const c of rows) (byDay[c.date] ??= []).push(c);
+  $("#out").innerHTML = Object.keys(byDay).sort().map(date =>
+    `<div class="day"><h2>${weekdays[weekdayOf(date)]} · ${date} <span style="color:var(--muted)">(${byDay[date].length})</span></h2>
+     <table>${byDay[date].map(classRow).join("")}</table></div>`).join("");
+}
+
+function renderAutomations() {
+  if (!autos.length) {
+    $("#out").innerHTML = `<div class="empty">Sin automatizaciones. Marca "auto" en una clase del calendario para reservarla cada semana.</div>`;
+    return;
+  }
+  $("#out").innerHTML = `<div class="day"><table>` + autos.map(r =>
+    `<tr><td class="time">${r.start}</td>
+      <td class="name">${r.name}</td>
+      <td class="club">${r.club} · ${weekdays[r.weekday]}</td>
+      <td class="actions"><button class="btn btn-cancel" onclick="removeAuto('${r.id}')">Quitar</button></td>
+    </tr>`).join("") + `</table></div>
+    <div class="empty" style="text-align:left;font-size:13px">Cada semana intenta reservar al abrir el plazo (48h antes) y reintenta desde 24h antes si está llena.</div>`;
+}
+
+// ---- acciones ----
+async function act(kind, c) {
+  try {
+    const res = await (await fetch(`/api/${kind}`, {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c)
+    })).json();
+    if (res.ok) { toast(kind === "book" ? "Reservada ✓" : "Cancelada ✓"); await load(); }
+    else toast(res.error || "Error", true);
+  } catch (e) { toast("Error: " + e, true); }
+}
+
+async function toggleAuto(c, on) {
+  try {
+    if (on) {
+      await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)});
+      toast("Automatización añadida ✓");
+    } else {
+      const rule = ruleFor(c);
+      if (rule) await fetch(`/api/automations?id=${rule.id}`, {method:"DELETE"});
+      toast("Automatización quitada");
+    }
+    autos = await (await fetch(`/api/automations`)).json();
+    render();
+  } catch (e) { toast("Error: " + e, true); }
+}
+
+async function removeAuto(id) {
+  await fetch(`/api/automations?id=${id}`, {method:"DELETE"});
+  autos = await (await fetch(`/api/automations`)).json();
+  render();
+}
+
+// ---- eventos ----
+document.querySelectorAll(".chips").forEach(group => {
+  group.addEventListener("click", e => {
+    const chip = e.target.closest(".chip"); if (!chip) return;
+    group.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    state[group.dataset.key] = chip.dataset.val;
+    render();
+  });
+});
+document.querySelectorAll(".tab").forEach(t =>
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    state.view = t.dataset.view;
+    render();
+  }));
+
+load();
+</script>
+</body>
+</html>
