@@ -1,158 +1,279 @@
 package automation
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/notification"
 )
 
-// Las clases se pueden reservar desde 48h antes; si están llenas, suelen
-// liberarse plazas a partir de 24h antes.
+// Tiempos de la política de reserva. El plazo abre 48h antes; las plazas
+// liberadas aparecen sobre todo al abrir y a partir de 24h antes, así que en
+// esos instantes sondeamos agresivamente.
 const (
-	windowOpen   = 48 * time.Hour
-	retryFrom    = 24 * time.Hour
-	tickInterval = 2 * time.Minute
+	slowInterval = 3 * time.Minute  // red de seguridad: pilla cancelaciones a cualquier hora
+	hotInterval  = 8 * time.Second  // sondeo agresivo en las ventanas calientes
+	hotLead      = 1 * time.Minute  // empezar a sondear 1 min antes del instante clave
+	hotAfter     = 12 * time.Minute // seguir caliente 12 min después del instante clave
+	horizonDays  = 6
 )
 
-// Engine ejecuta las reglas: intenta reservar cada ocurrencia al abrir el plazo
-// (48h antes) y reintenta desde 24h antes si estaba llena.
+// Engine ejecuta las reglas con timing preciso.
 type Engine struct {
 	store    *Store
-	classes  func() ([]calendar.Class, error)  // calendario autenticado actual
-	book     func(bookingID, center int) error // reserva (cliente autenticado)
-	location *time.Location
+	fetchDay func(date string) ([]calendar.Class, error) // fetch fresco de un día (autenticado, curado)
+	book     func(bookingID, center int) error
+	notify   notification.Notifier
+	loc      *time.Location
 
 	mu    sync.Mutex
 	state map[string]*occState // clave: ruleID|fecha
 }
 
 type occState struct {
-	phase1Done bool
-	booked     bool
-	attempts   int
-	lastError  string
-	lastTry    time.Time
+	booked       bool
+	attempts     int
+	lastError    string
+	missNotified bool
+	name, club   string
+	date, start  string
 }
 
-// NewEngine crea el motor. `classes` debe devolver el calendario autenticado
-// (con booked/bookingId/center); `book` reserva con el cliente autenticado.
-func NewEngine(store *Store, classes func() ([]calendar.Class, error), book func(bookingID, center int) error) *Engine {
+func NewEngine(store *Store, fetchDay func(string) ([]calendar.Class, error), book func(int, int) error, notify notification.Notifier) *Engine {
 	loc, err := time.LoadLocation("Europe/Rome")
 	if err != nil {
 		loc = time.UTC
 	}
-	return &Engine{store: store, classes: classes, book: book, location: loc, state: map[string]*occState{}}
+	if notify == nil {
+		notify = notification.NoOp{}
+	}
+	return &Engine{store: store, fetchDay: fetchDay, book: book, notify: notify, loc: loc, state: map[string]*occState{}}
 }
 
-// Run arranca el bucle periódico hasta que se cierre `stop`.
+// occ es una ocurrencia concreta de una regla (un día concreto).
+type occ struct {
+	rule  Rule
+	date  string
+	start time.Time
+}
+
+// Run arranca el bucle adaptativo: duerme hasta el siguiente instante clave y
+// sondea rápido en las ventanas calientes, con un repaso lento periódico.
 func (e *Engine) Run(stop <-chan struct{}) {
-	t := time.NewTicker(tickInterval)
-	defer t.Stop()
-	e.tick() // primera pasada inmediata
+	lastSlow := time.Time{}
 	for {
+		now := time.Now().In(e.loc)
+		if now.Sub(lastSlow) >= slowInterval {
+			e.cycle(now, false)
+			lastSlow = now
+		} else if e.hotActive(now) {
+			e.cycle(now, true)
+		}
 		select {
 		case <-stop:
 			return
-		case <-t.C:
-			e.tick()
+		case <-time.After(e.untilNext(time.Now().In(e.loc), lastSlow)):
 		}
 	}
 }
 
-// tick evalúa todas las reglas una vez.
-func (e *Engine) tick() {
-	rules := e.store.List()
-	if len(rules) == 0 {
-		return
-	}
-	classes, err := e.classes()
-	if err != nil {
-		log.Printf("automation: no se pudo leer el calendario: %v", err)
-		return
-	}
-
-	now := time.Now().In(e.location)
-	for _, r := range rules {
+// occurrences calcula, a partir de las reglas, las próximas ocurrencias no
+// reservadas (sin tocar la red: solo por día de la semana y hora).
+func (e *Engine) occurrences(now time.Time) []occ {
+	var out []occ
+	for _, r := range e.store.List() {
 		if !r.Enabled {
 			continue
 		}
-		for _, c := range classes {
-			if !matches(r, c, e.location) {
+		for d := 0; d <= horizonDays; d++ {
+			day := now.AddDate(0, 0, d)
+			if int(day.Weekday()) != r.Weekday {
 				continue
 			}
-			e.handle(r, c, now)
+			date := day.Format("2006-01-02")
+			start, err := time.ParseInLocation("2006-01-02 15:04", date+" "+r.Start, e.loc)
+			if err != nil || start.Before(now) {
+				continue
+			}
+			if st := e.get(r.ID + "|" + date); st != nil && st.booked {
+				continue
+			}
+			out = append(out, occ{rule: r, date: date, start: start})
 		}
+	}
+	return out
+}
+
+// cycle evalúa las ocurrencias. Si hotOnly, solo las que están en ventana
+// caliente (para sondear rápido sin barrer todo).
+func (e *Engine) cycle(now time.Time, hotOnly bool) {
+	occs := e.occurrences(now)
+
+	dates := map[string]bool{}
+	for _, o := range occs {
+		if hotOnly && !isHot(o.start, now) {
+			continue
+		}
+		dates[o.date] = true
+	}
+
+	for date := range dates {
+		classes, err := e.fetchDay(date)
+		if err != nil {
+			log.Printf("automation: fetch %s: %v", date, err)
+			continue
+		}
+		for _, o := range occs {
+			if o.date == date {
+				e.handle(o, classes)
+			}
+		}
+	}
+
+	if !hotOnly {
+		e.notifyMisses(now)
 	}
 }
 
-// handle aplica la política 48h/24h a una ocurrencia concreta.
-func (e *Engine) handle(r Rule, c calendar.Class, now time.Time) {
-	st, err := time.ParseInLocation("2006-01-02 15:04", c.Date+" "+c.Start, e.location)
-	if err != nil {
+// handle intenta reservar una ocurrencia si el sitio la marca reservable.
+func (e *Engine) handle(o occ, classes []calendar.Class) {
+	st := e.ensureState(o)
+	if st.booked {
+		return
+	}
+	c := findMatch(classes, o.rule)
+	if c == nil {
+		return
+	}
+	if c.Booked {
+		st.booked = true
+		return
+	}
+	if c.Status != "bookable" || c.BookingID == 0 {
 		return
 	}
 
-	key := r.ID + "|" + c.Date
+	st.attempts++
+	if err := e.book(c.BookingID, c.Center); err != nil {
+		st.lastError = err.Error()
+		log.Printf("automation: %s %s @ %s → %v", o.rule.Name, o.date, o.rule.Start, err)
+		return
+	}
+	st.booked = true
+	st.lastError = ""
+	log.Printf("automation: ✓ reservada %s %s %s @ %s", o.rule.Name, o.rule.Club, o.date, o.rule.Start)
+	e.send(
+		fmt.Sprintf("VirginBot: reservada %s", o.rule.Name),
+		fmt.Sprintf("Reservada automáticamente:\n\n%s\n%s · %s %s\n", o.rule.Name, o.rule.Club, weekdayName(o.start), o.start.Format("02/01 15:04")),
+	)
+}
+
+// notifyMisses avisa (una vez) de las ocurrencias cuyo inicio pasó sin lograr
+// reservar, si llegamos a intentarlo.
+func (e *Engine) notifyMisses(now time.Time) {
 	e.mu.Lock()
-	stt := e.state[key]
-	if stt == nil {
-		stt = &occState{}
-		e.state[key] = stt
+	var miss []*occState
+	for _, st := range e.state {
+		if st.booked || st.missNotified || st.attempts == 0 {
+			continue
+		}
+		start, err := time.ParseInLocation("2006-01-02 15:04", st.date+" "+st.start, e.loc)
+		if err == nil && now.After(start) {
+			st.missNotified = true
+			miss = append(miss, st)
+		}
 	}
 	e.mu.Unlock()
 
-	if c.Booked {
-		stt.booked = true
-		return
+	for _, st := range miss {
+		e.send(
+			fmt.Sprintf("VirginBot: NO reservada %s", st.name),
+			fmt.Sprintf("No se pudo reservar (%d intentos, último error: %s):\n\n%s\n%s · %s %s\n",
+				st.attempts, st.lastError, st.name, st.club, st.date, st.start),
+		)
 	}
-	if stt.booked || c.BookingID == 0 {
-		return // ya reservada por nosotros, o sin botón reservable
-	}
+}
 
-	opens := st.Add(-windowOpen)
-	switch {
-	case now.Before(opens):
-		return // el plazo aún no ha abierto
-	case now.After(st):
-		return // la clase ya pasó
-	case now.Before(st.Add(-retryFrom)):
-		// Fase 1: entre 48h y 24h antes, un único intento al abrir el plazo.
-		if !stt.phase1Done {
-			stt.phase1Done = true
-			e.attempt(r, c, stt)
+func (e *Engine) send(subject, body string) {
+	if err := e.notify.Notify(subject, body); err != nil {
+		log.Printf("automation: aviso email fallido: %v", err)
+	}
+}
+
+// untilNext devuelve cuánto dormir: hotInterval si hay ventana caliente activa;
+// si no, hasta el inicio de la próxima ventana caliente o el próximo repaso lento.
+func (e *Engine) untilNext(now, lastSlow time.Time) time.Duration {
+	if e.hotActive(now) {
+		return hotInterval
+	}
+	next := slowInterval - now.Sub(lastSlow)
+	for _, o := range e.occurrences(now) {
+		for _, m := range []time.Time{o.start.Add(-48 * time.Hour), o.start.Add(-24 * time.Hour)} {
+			startAt := m.Add(-hotLead)
+			if d := startAt.Sub(now); d > 0 && d < next {
+				next = d
+			}
 		}
-	default:
-		// Fase 2: desde 24h antes, reintenta cada tick hasta conseguirlo.
-		e.attempt(r, c, stt)
 	}
+	if next < hotInterval {
+		next = hotInterval
+	}
+	return next
 }
 
-// attempt intenta reservar y registra el resultado.
-func (e *Engine) attempt(r Rule, c calendar.Class, stt *occState) {
-	stt.attempts++
-	stt.lastTry = time.Now()
-	err := e.book(c.BookingID, c.Center)
-	if err != nil {
-		stt.lastError = err.Error()
-		log.Printf("automation: %s %s %s @ %s → %v", r.Name, r.Club, c.Date, c.Start, err)
-		return
+func (e *Engine) hotActive(now time.Time) bool {
+	for _, o := range e.occurrences(now) {
+		if isHot(o.start, now) {
+			return true
+		}
 	}
-	stt.booked = true
-	stt.lastError = ""
-	log.Printf("automation: ✓ reservada %s %s %s @ %s", r.Name, r.Club, c.Date, c.Start)
+	return false
 }
 
-// matches indica si una clase del calendario corresponde a una regla.
-func matches(r Rule, c calendar.Class, loc *time.Location) bool {
-	if !strings.EqualFold(c.Name, r.Name) || !strings.EqualFold(c.Club, r.Club) || c.Start != r.Start {
-		return false
+// isHot indica si `now` cae en la ventana caliente alrededor de T-48h o T-24h.
+func isHot(start, now time.Time) bool {
+	for _, m := range []time.Time{start.Add(-48 * time.Hour), start.Add(-24 * time.Hour)} {
+		if !now.Before(m.Add(-hotLead)) && !now.After(m.Add(hotAfter)) {
+			return true
+		}
 	}
-	d, err := time.ParseInLocation("2006-01-02", c.Date, loc)
-	if err != nil {
-		return false
-	}
-	return int(d.Weekday()) == r.Weekday
+	return false
 }
+
+func findMatch(classes []calendar.Class, r Rule) *calendar.Class {
+	for i := range classes {
+		c := &classes[i]
+		if strings.EqualFold(c.Name, r.Name) && strings.EqualFold(c.Club, r.Club) && c.Start == r.Start {
+			return c
+		}
+	}
+	return nil
+}
+
+// ---- estado ----
+
+func (e *Engine) get(key string) *occState {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.state[key]
+}
+
+func (e *Engine) ensureState(o occ) *occState {
+	key := o.rule.ID + "|" + o.date
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st := e.state[key]
+	if st == nil {
+		st = &occState{name: o.rule.Name, club: o.rule.Club, date: o.date, start: o.rule.Start}
+		e.state[key] = st
+	}
+	return st
+}
+
+var weekdaysIT = [...]string{"Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"}
+
+func weekdayName(t time.Time) string { return weekdaysIT[int(t.Weekday())] }

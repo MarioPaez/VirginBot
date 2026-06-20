@@ -4,3 +4,4 @@
 # Entorno
 .env
 automations.json
+credentials.enc

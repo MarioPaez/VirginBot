@@ -6,13 +6,18 @@ import (
 	"os"
 	"strings"
 
+	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/booking"
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/notification"
 	"github.com/MarioPaez/VirginBot/server"
 )
 
-const automationsFile = "automations.json"
+const (
+	automationsFile = "automations.json"
+	credentialsFile = "credentials.enc"
+)
 
 func main() {
 	addr := os.Getenv("ADDR")
@@ -20,7 +25,23 @@ func main() {
 		addr = ":8080"
 	}
 
-	auth := server.NewAuth(os.Getenv("VA_EMAIL"), os.Getenv("VA_PASS"))
+	secret := os.Getenv("APP_SECRET")
+	if secret == "" {
+		secret = "virginbot-default-secret"
+		log.Println("aviso: APP_SECRET no definido; usando clave por defecto (menos seguro)")
+	}
+	acc, err := account.NewStore(credentialsFile, secret)
+	if err != nil {
+		log.Fatalf("almacén de credenciales: %v", err)
+	}
+	// Compatibilidad: si no hay credenciales guardadas pero sí en el entorno,
+	// las sembramos (así sigue funcionando sin pasar por el login del FE).
+	if _, _, ok := acc.Get(); !ok {
+		if e, p := os.Getenv("VA_EMAIL"), os.Getenv("VA_PASS"); e != "" && p != "" {
+			acc.Set(e, p)
+		}
+	}
+	auth := server.NewAuth(acc)
 
 	clubs := []string{calendar.ClubCorsoComo, calendar.ClubPiazzaCavour}
 	classIDs := []string{
@@ -45,15 +66,19 @@ func main() {
 
 	srv := server.New(auth, clubs, classIDs, keep, store)
 
-	// Motor de automatización: usa el calendario autenticado del servidor y
-	// reserva con el cliente autenticado.
-	engine := automation.NewEngine(store, srv.Classes, func(bookingID, center int) error {
+	// Motor de automatización: sondea con timing preciso (fetch fresco por día),
+	// reserva con el cliente autenticado y avisa por email del resultado.
+	engine := automation.NewEngine(store, srv.FreshDay, func(bookingID, center int) error {
 		client, err := auth.Client()
 		if err != nil {
 			return err
 		}
-		return booking.Book(client, bookingID, center)
-	})
+		if err := booking.Book(client, bookingID, center); err != nil {
+			return err
+		}
+		srv.Invalidate() // refresca el estado de reserva en el FE
+		return nil
+	}, notification.FromEnv())
 	go engine.Run(make(chan struct{}))
 
 	log.Printf("API escuchando en http://localhost%s", addr)

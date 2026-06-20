@@ -53,6 +53,20 @@
            pointer-events:none; max-width:80vw; }
   #toast.show { opacity:1; }
   #toast.err { border-color:var(--red); }
+  .logout { background:transparent; border:1px solid var(--line); color:var(--muted);
+            border-radius:8px; padding:5px 12px; cursor:pointer; font-size:13px; }
+  .logout:hover { border-color:var(--muted); }
+  .login-overlay { position:fixed; inset:0; background:var(--bg); display:flex;
+                   align-items:center; justify-content:center; z-index:10; }
+  .login-card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+                padding:32px; width:340px; max-width:90vw; display:flex; flex-direction:column; gap:12px; }
+  .login-card h2 { margin:0; font-size:22px; } .login-card h2 span { color:var(--red); }
+  .login-sub { color:var(--muted); font-size:13px; margin:0 0 8px; }
+  .login-card input { background:var(--bg); border:1px solid var(--line); border-radius:8px;
+                      padding:10px 12px; color:#e9ecf1; font-size:14px; outline:none; }
+  .login-card input:focus { border-color:var(--red); }
+  .login-card .btn { padding:10px; font-size:15px; }
+  .login-err { color:var(--red); font-size:13px; min-height:16px; }
 </style>
 </head>
 <body>
@@ -60,6 +74,7 @@
   <div class="top">
     <h1>Virgin<span>Bot</span> · Calendario corsi</h1>
     <div class="meta" id="meta"></div>
+    <button class="logout" onclick="logout()">Salir</button>
   </div>
   <div class="tabs">
     <button class="tab active" data-view="calendar">Calendario</button>
@@ -88,12 +103,23 @@
 <main id="out"><div class="loading">Preparando el calendario…</div></main>
 <div id="toast"></div>
 
+<div id="login" class="login-overlay" style="display:none">
+  <form class="login-card" onsubmit="doLogin(event)">
+    <h2>Virgin<span>Bot</span></h2>
+    <p class="login-sub">Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.</p>
+    <input id="li-email" type="email" placeholder="email" autocomplete="username" required>
+    <input id="li-pass" type="password" placeholder="contraseña" autocomplete="current-password" required>
+    <button type="submit" class="btn btn-book" id="li-btn">Entrar</button>
+    <div id="li-err" class="login-err"></div>
+  </form>
+</div>
+
 <script>
 const DAYS = 10;
 const weekdays = ["Domenica","Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato"];
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let all = [], autos = [], loadToken = 0;
+let all = [], autos = [], bookings = [], loadToken = 0;
 const state = { q: "", club: "", view: "calendar" };
 
 const weekdayOf = date => new Date(date + "T00:00:00").getDay();
@@ -107,36 +133,42 @@ function toast(msg, isErr) {
   setTimeout(() => t.className = "", 3500);
 }
 
-async function waitReady(token) {
-  const t0 = Date.now();
-  for (;;) {
-    const s = await (await fetch(`/api/status?days=${DAYS}`)).json();
-    if (token !== loadToken) return false;
-    if (s.ready) return true;
-    $("#out").innerHTML = `<div class="loading">Preparando el calendario… ${Math.round((Date.now()-t0)/1000)}s` +
-      `<br><small>La primera carga puede tardar hasta ~1 min.</small></div>`;
-    await sleep(2000);
-  }
-}
-
 async function load() {
   const token = ++loadToken;
-  try {
-    if (!await waitReady(token)) return;
-    const [data, a] = await Promise.all([
-      (await fetch(`/api/classes?days=${DAYS}`)).json(),
-      (await fetch(`/api/automations`)).json(),
-    ]);
+  autos = await (await fetch(`/api/automations`)).json().catch(() => []);
+  await loadCalendar(token);
+}
+
+// loadCalendar pide las fechas y luego cada día en paralelo, pintando cada uno
+// en cuanto llega (caché por día en el servidor: las recargas son instantáneas).
+async function loadCalendar(token) {
+  all = [];
+  $("#out").innerHTML = `<div class="loading">Cargando calendario…</div>`;
+  const { dates } = await (await fetch(`/api/dates?days=${DAYS}`)).json();
+  if (token !== loadToken) return;
+  let done = 0;
+  const addDay = async date => {
+    const classes = await fetchDay(`/api/day?date=${date}`);
     if (token !== loadToken) return;
-    all = data.classes || [];
-    autos = a || [];
+    all.push(...classes);
+    $("#meta").textContent = `${all.length} clases · ${++done}/${dates.length} días`;
     populateClubChips(all);
-    const t = new Date(data.fetchedAt).toLocaleTimeString("it-IT");
-    $("#meta").textContent = `${all.length} clases · próximos ${DAYS} días · ${t}`;
-    render();
-  } catch (e) {
-    $("#out").innerHTML = `<div class="empty">Error cargando datos: ${e}</div>`;
+    if (state.view === "calendar") render();
+  };
+  // Hoy primero (primer pintado rápido), luego el resto en paralelo.
+  await addDay(dates[0]);
+  await Promise.all(dates.slice(1).map(addDay));
+}
+
+// fetchDay pide un día, reintentando mientras el servidor responde 202 (cargando).
+async function fetchDay(url) {
+  for (let i = 0; i < 40; i++) {
+    const res = await fetch(url);
+    if (res.status === 200) return (await res.json()).classes || [];
+    if (res.status === 401) { showLogin(); return []; }
+    await sleep(1500);
   }
+  return [];
 }
 
 function populateClubChips(list) {
@@ -149,19 +181,35 @@ function populateClubChips(list) {
 function render() {
   $("#controls").style.display = state.view === "calendar" ? "flex" : "none";
   if (state.view === "automations") return renderAutomations();
-  const rows = (state.view === "bookings")
-    ? all.filter(c => c.booked)
-    : all.filter(c => (!state.q || c.name.toLowerCase().includes(state.q)) && (!state.club || c.club === state.club));
-  renderClasses(rows, state.view === "bookings");
+  if (state.view === "bookings") return renderClasses(bookings, true);
+  const rows = all.filter(c => (!state.q || c.name.toLowerCase().includes(state.q)) && (!state.club || c.club === state.club));
+  renderClasses(rows, false);
 }
+
+// loadBookings escanea las reservas día a día (próximos días) y las va pintando.
+async function loadBookings() {
+  bookings = [];
+  $("#out").innerHTML = `<div class="loading">Cargando tus reservas…</div>`;
+  const { dates } = await (await fetch(`/api/dates?days=3`)).json();
+  await Promise.all(dates.map(async date => {
+    const classes = await fetchDay(`/api/bookingday?date=${date}`);
+    bookings.push(...classes);
+    if (state.view === "bookings") renderClasses(bookings, true);
+  }));
+  if (state.view === "bookings" && !bookings.length) renderClasses([], true);
+}
+
+const STATUS_BADGE = { waitlist: "lleno", unavailable: "no disp." };
 
 function classRow(c) {
   const rule = ruleFor(c);
-  const action = c.booked
-    ? `<button class="btn btn-cancel" onclick='act("unbook",${JSON.stringify(c)})'>Cancelar</button>`
-    : (c.bookingId > 0
-        ? `<button class="btn btn-book" onclick='act("book",${JSON.stringify(c)})'>Reservar</button>`
-        : `<span class="badge">no disp.</span>`);
+  let action;
+  if (c.booked)
+    action = `<button class="btn btn-cancel" onclick='act("unbook",${JSON.stringify(c)})'>Cancelar</button>`;
+  else if (c.status === "bookable")
+    action = `<button class="btn btn-book" onclick='act("book",${JSON.stringify(c)})'>Reservar</button>`;
+  else
+    action = `<span class="badge">${STATUS_BADGE[c.status] || "no disp."}</span>`;
   const auto = `<label class="auto"><input type="checkbox" ${rule?"checked":""}
         onchange='toggleAuto(${JSON.stringify(c)}, this.checked)'>auto</label>`;
   return `<tr class="${c.booked?"booked":""}">
@@ -204,8 +252,10 @@ async function act(kind, c) {
     const res = await (await fetch(`/api/${kind}`, {
       method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c)
     })).json();
-    if (res.ok) { toast(kind === "book" ? "Reservada ✓" : "Cancelada ✓"); await load(); }
-    else toast(res.error || "Error", true);
+    if (res.ok) {
+      toast(kind === "book" ? "Reservada ✓" : "Cancelada ✓");
+      if (state.view === "bookings") loadBookings(); else load();
+    } else toast(res.error || "Error", true);
   } catch (e) { toast("Error: " + e, true); }
 }
 
@@ -246,9 +296,44 @@ document.querySelectorAll(".tab").forEach(t =>
     t.classList.add("active");
     state.view = t.dataset.view;
     render();
+    if (state.view === "bookings") loadBookings();
   }));
 
-load();
+// ---- login ----
+function showLogin() { $("#login").style.display = "flex"; }
+function showApp()   { $("#login").style.display = "none"; }
+
+async function init() {
+  try {
+    const me = await (await fetch("/api/me")).json();
+    if (me.loggedIn) { showApp(); load(); }
+    else showLogin();
+  } catch (e) { showLogin(); }
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = $("#li-btn");
+  btn.disabled = true;
+  $("#li-err").textContent = "Entrando…";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: $("#li-email").value, pass: $("#li-pass").value }),
+    });
+    const d = await res.json();
+    if (d.ok) { $("#li-err").textContent = ""; showApp(); load(); }
+    else $("#li-err").textContent = d.error || "Error";
+  } catch (err) { $("#li-err").textContent = "Error: " + err; }
+  btn.disabled = false;
+}
+
+async function logout() {
+  await fetch("/api/logout", { method: "POST" });
+  location.reload();
+}
+
+init();
 </script>
 </body>
 </html>

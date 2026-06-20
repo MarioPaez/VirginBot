@@ -3,12 +3,10 @@ package server
 import (
 	"embed"
 	"encoding/json"
-	"errors"
 	"io/fs"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,8 +14,6 @@ import (
 	"github.com/MarioPaez/VirginBot/booking"
 	"github.com/MarioPaez/VirginBot/calendar"
 )
-
-var errWarming = errors.New("calendario aún cargando")
 
 //go:embed web
 var webFS embed.FS
@@ -27,44 +23,53 @@ const (
 	maxDays       = 30
 	cacheTTL      = 5 * time.Minute
 	refreshPeriod = 4 * time.Minute
+	maxConcurrent = 5 // días en paralelo (más satura el backend remoto)
 )
 
-// Server sirve el calendario, reservas y automatizaciones.
+// Server sirve el calendario (caché por día), reservas y automatizaciones.
 type Server struct {
 	auth     *Auth
 	clubs    []string
 	classIDs []string
 	keep     func(calendar.Class) bool
 	store    *automation.Store
-
-	plain *http.Client // cliente sin auth, para listar si el login falla
+	loc      *time.Location
+	plain    *http.Client
+	sem      chan struct{} // limita fetches concurrentes
+	sess     *sessions
 
 	mu       sync.Mutex
-	cache    map[int]cacheEntry
-	inflight map[int]bool
+	days     map[string]dayEntry // calendario curado, por fecha YYYY-MM-DD
+	daysIn   map[string]bool
+	booked   map[string]dayEntry // reservas (escaneo completo), por fecha
+	bookedIn map[string]bool
 }
 
-type cacheEntry struct {
+type dayEntry struct {
 	classes   []calendar.Class
 	fetchedAt time.Time
 }
 
-// New crea el servidor y precarga la caché.
 func New(auth *Auth, clubs, classIDs []string, keep func(calendar.Class) bool, store *automation.Store) *Server {
-	s := &Server{
-		auth:     auth,
-		clubs:    clubs,
-		classIDs: classIDs,
-		keep:     keep,
-		store:    store,
-		plain:    &http.Client{Timeout: 45 * time.Second},
-		cache:    make(map[int]cacheEntry),
-		inflight: make(map[int]bool),
+	loc, err := time.LoadLocation("Europe/Rome")
+	if err != nil {
+		loc = time.UTC
 	}
-	s.ensure(defaultDays)
+	s := &Server{
+		auth: auth, clubs: clubs, classIDs: classIDs, keep: keep, store: store, loc: loc,
+		plain:    &http.Client{Timeout: 45 * time.Second},
+		sem:      make(chan struct{}, maxConcurrent),
+		sess:     newSessions(),
+		days:     map[string]dayEntry{},
+		daysIn:   map[string]bool{},
+		booked:   map[string]dayEntry{},
+		bookedIn: map[string]bool{},
+	}
 	go func() {
+		s.client() // login una vez para calentar la sesión www antes de precargar
+		s.warm()
 		for range time.Tick(refreshPeriod) {
-			s.refresh(defaultDays)
+			s.warm()
 		}
 	}()
 	return s
@@ -72,86 +77,192 @@ func New(auth *Auth, clubs, classIDs []string, keep func(calendar.Class) bool, s
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/classes", s.handleClasses)
-	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/bookings", s.handleBookings)
-	mux.HandleFunc("/api/book", s.handleBook)
-	mux.HandleFunc("/api/unbook", s.handleUnbook)
-	mux.HandleFunc("/api/automations", s.handleAutomations)
+	// Públicas: login y estado de sesión.
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/me", s.handleMe)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-
+	// Protegidas: requieren sesión.
+	mux.HandleFunc("/api/dates", s.requireSession(s.handleDates))
+	mux.HandleFunc("/api/day", s.requireSession(s.handleDay))
+	mux.HandleFunc("/api/bookingday", s.requireSession(s.handleBookingDay))
+	mux.HandleFunc("/api/book", s.requireSession(s.handleBook))
+	mux.HandleFunc("/api/unbook", s.requireSession(s.handleUnbook))
+	mux.HandleFunc("/api/automations", s.requireSession(s.handleAutomations))
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("/", http.FileServer(http.FS(static)))
 	return withCORS(mux)
 }
 
-// ---- calendario ----
-
-type statusResponse struct {
-	Ready     bool      `json:"ready"`
-	Count     int       `json:"count"`
-	FetchedAt time.Time `json:"fetchedAt,omitempty"`
+// dates devuelve las próximas `days` fechas (zona horaria de Italia).
+func (s *Server) dates(days int) []string {
+	now := time.Now().In(s.loc)
+	out := make([]string, days)
+	for i := 0; i < days; i++ {
+		out[i] = now.AddDate(0, 0, i).Format("2006-01-02")
+	}
+	return out
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	entry, ready := s.ensure(clampDays(r.URL.Query().Get("days")))
-	writeJSON(w, statusResponse{Ready: ready, Count: len(entry.classes), FetchedAt: entry.fetchedAt})
+// warm precarga el calendario curado. Carga HOY primero y espera a que esté
+// listo antes de lanzar el resto, para que el primer día (lo que ve el usuario
+// al abrir) tenga toda la banda y aparezca cuanto antes.
+func (s *Server) warm() {
+	dates := s.dates(defaultDays)
+	if len(dates) == 0 {
+		return
+	}
+	s.ensureDay(dates[0])
+	s.waitDay(dates[0])
+	for _, d := range dates[1:] {
+		s.ensureDay(d)
+	}
 }
 
-type classesResponse struct {
-	FetchedAt time.Time        `json:"fetchedAt"`
-	Count     int              `json:"count"`
-	Classes   []calendar.Class `json:"classes"`
+// waitDay bloquea hasta que el día esté cacheado (o hasta un límite razonable).
+func (s *Server) waitDay(date string) {
+	for i := 0; i < 60; i++ {
+		s.mu.Lock()
+		_, ok := s.days[date]
+		s.mu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
-func (s *Server) handleClasses(w http.ResponseWriter, r *http.Request) {
+// ---- endpoints calendario ----
+
+func (s *Server) handleDates(w http.ResponseWriter, r *http.Request) {
 	days := clampDays(r.URL.Query().Get("days"))
-	entry, ready := s.ensure(days)
-	if !ready {
-		w.WriteHeader(http.StatusAccepted)
-		writeJSON(w, statusResponse{Ready: false})
-		return
-	}
-
-	q := strings.ToLower(r.URL.Query().Get("q"))
-	club := strings.ToLower(r.URL.Query().Get("club"))
-	filtered := make([]calendar.Class, 0, len(entry.classes))
-	for _, c := range entry.classes {
-		if q != "" && !strings.Contains(strings.ToLower(c.Name), q) {
-			continue
-		}
-		if club != "" && !strings.Contains(strings.ToLower(c.Club), club) {
-			continue
-		}
-		filtered = append(filtered, c)
-	}
-	writeJSON(w, classesResponse{FetchedAt: entry.fetchedAt, Count: len(filtered), Classes: filtered})
+	writeJSON(w, map[string]any{"dates": s.dates(days)})
 }
 
-// handleBookings devuelve las clases ya reservadas (de la caché autenticada).
-func (s *Server) handleBookings(w http.ResponseWriter, _ *http.Request) {
-	entry, ready := s.ensure(defaultDays)
-	if !ready {
-		w.WriteHeader(http.StatusAccepted)
-		writeJSON(w, statusResponse{Ready: false})
+type dayResponse struct {
+	Date    string           `json:"date"`
+	Ready   bool             `json:"ready"`
+	Classes []calendar.Class `json:"classes"`
+}
+
+func (s *Server) handleDay(w http.ResponseWriter, r *http.Request) {
+	date := r.URL.Query().Get("date")
+	if !validDate(date) {
+		http.Error(w, "fecha inválida", http.StatusBadRequest)
 		return
 	}
-	var booked []calendar.Class
-	for _, c := range entry.classes {
+	entry, ready := s.ensureDay(date)
+	if !ready {
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, dayResponse{Date: date, Ready: false})
+		return
+	}
+	writeJSON(w, dayResponse{Date: date, Ready: true, Classes: entry.classes})
+}
+
+func (s *Server) handleBookingDay(w http.ResponseWriter, r *http.Request) {
+	date := r.URL.Query().Get("date")
+	if !validDate(date) {
+		http.Error(w, "fecha inválida", http.StatusBadRequest)
+		return
+	}
+	entry, ready := s.ensureBookingDay(date)
+	if !ready {
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, dayResponse{Date: date, Ready: false})
+		return
+	}
+	writeJSON(w, dayResponse{Date: date, Ready: true, Classes: entry.classes})
+}
+
+// ---- caché por día (calendario curado) ----
+
+func (s *Server) ensureDay(date string) (dayEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.days[date]; ok && time.Since(e.fetchedAt) < cacheTTL {
+		return e, true
+	}
+	if !s.daysIn[date] {
+		s.daysIn[date] = true
+		go s.fetchDay(date)
+	}
+	if e, ok := s.days[date]; ok {
+		return e, true
+	}
+	return dayEntry{}, false
+}
+
+func (s *Server) fetchDay(date string) {
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
+
+	day, _ := time.ParseInLocation("2006-01-02", date, s.loc)
+	classes, err := calendar.FetchDay(s.client(), s.clubs, s.classIDs, day)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.daysIn, date)
+	if err != nil {
+		log.Printf("día %s fallido: %v", date, err)
+		return
+	}
+	s.days[date] = dayEntry{classes: s.curate(classes), fetchedAt: time.Now()}
+}
+
+// ---- caché por día (reservas: escaneo completo sin filtro de clase) ----
+
+func (s *Server) ensureBookingDay(date string) (dayEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.booked[date]; ok && time.Since(e.fetchedAt) < cacheTTL {
+		return e, true
+	}
+	if !s.bookedIn[date] {
+		s.bookedIn[date] = true
+		go s.fetchBookingDay(date)
+	}
+	if e, ok := s.booked[date]; ok {
+		return e, true
+	}
+	return dayEntry{}, false
+}
+
+func (s *Server) fetchBookingDay(date string) {
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
+
+	day, _ := time.ParseInLocation("2006-01-02", date, s.loc)
+	classes, err := calendar.FetchDay(s.client(), s.clubs, nil, day) // nil = todas las clases
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.bookedIn, date)
+	if err != nil {
+		log.Printf("reservas %s fallido: %v", date, err)
+		return
+	}
+	booked := make([]calendar.Class, 0)
+	for _, c := range classes {
 		if c.Booked {
 			booked = append(booked, c)
 		}
 	}
-	writeJSON(w, classesResponse{FetchedAt: entry.fetchedAt, Count: len(booked), Classes: booked})
+	s.booked[date] = dayEntry{classes: booked, fetchedAt: time.Now()}
 }
 
-// Classes expone el calendario autenticado cacheado (para el motor).
-func (s *Server) Classes() ([]calendar.Class, error) {
-	entry, ready := s.ensure(defaultDays)
-	if !ready {
-		return nil, errWarming
+// FreshDay obtiene un día curado SIN pasar por la caché (lo usa el motor para
+// sondear en tiempo real durante las ventanas calientes).
+func (s *Server) FreshDay(date string) ([]calendar.Class, error) {
+	day, err := time.ParseInLocation("2006-01-02", date, s.loc)
+	if err != nil {
+		return nil, err
 	}
-	return entry.classes, nil
+	classes, err := calendar.FetchDay(s.client(), s.clubs, s.classIDs, day)
+	if err != nil {
+		return nil, err
+	}
+	return s.curate(classes), nil
 }
 
 // ---- reservas ----
@@ -166,9 +277,8 @@ type bookRequest struct {
 }
 
 func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
-	var req bookRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "petición inválida", http.StatusBadRequest)
+	req, ok := decodeBook(w, r)
+	if !ok {
 		return
 	}
 	client, err := s.auth.Client()
@@ -180,16 +290,13 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	s.invalidate()
+	s.Invalidate()
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// handleUnbook cancela la reserva y, si la clase tenía automatización, la quita
-// para que no se vuelva a reservar.
 func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
-	var req bookRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "petición inválida", http.StatusBadRequest)
+	req, ok := decodeBook(w, r)
+	if !ok {
 		return
 	}
 	client, err := s.auth.Client()
@@ -204,8 +311,17 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 	if wd, ok := weekdayOf(req.Date); ok {
 		s.store.RemoveMatching(req.Name, req.Club, wd, req.Start)
 	}
-	s.invalidate()
+	s.Invalidate()
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func decodeBook(w http.ResponseWriter, r *http.Request) (bookRequest, bool) {
+	var req bookRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "petición inválida", http.StatusBadRequest)
+		return req, false
+	}
+	return req, true
 }
 
 // ---- automatizaciones ----
@@ -215,9 +331,8 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		writeJSON(w, s.store.List())
 	case http.MethodPost:
-		var req bookRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "petición inválida", http.StatusBadRequest)
+		req, ok := decodeBook(w, r)
+		if !ok {
 			return
 		}
 		wd, ok := weekdayOf(req.Date)
@@ -242,64 +357,14 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ---- caché ----
+// ---- helpers ----
 
-func (s *Server) ensure(days int) (cacheEntry, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if e, ok := s.cache[days]; ok && time.Since(e.fetchedAt) < cacheTTL {
-		return e, true
-	}
-	if !s.inflight[days] {
-		s.inflight[days] = true
-		go s.fetch(days)
-	}
-	if e, ok := s.cache[days]; ok {
-		return e, true
-	}
-	return cacheEntry{}, false
-}
-
-func (s *Server) refresh(days int) {
-	s.mu.Lock()
-	if s.inflight[days] {
-		s.mu.Unlock()
-		return
-	}
-	s.inflight[days] = true
-	s.mu.Unlock()
-	s.fetch(days)
-}
-
-func (s *Server) fetch(days int) {
-	start := time.Now()
-	// Cliente autenticado para ver el estado de reserva; si falla, lista público.
-	client := s.plain
+// client devuelve el cliente autenticado, o el público si el login falla.
+func (s *Server) client() *http.Client {
 	if c, err := s.auth.Client(); err == nil {
-		client = c
-	} else {
-		log.Printf("sin sesión www (calendario sin estado de reserva): %v", err)
+		return c
 	}
-
-	classes, err := calendar.FetchRange(client, s.clubs, s.classIDs, time.Now(), days)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.inflight, days)
-	if err != nil {
-		log.Printf("carga de %d días fallida: %v", days, err)
-		return
-	}
-	classes = s.curate(classes)
-	s.cache[days] = cacheEntry{classes: classes, fetchedAt: time.Now()}
-	log.Printf("caché de %d días lista (%d clases) en %s", days, len(classes), time.Since(start).Round(time.Millisecond))
-}
-
-// invalidate marca la caché como caduca para refrescar el estado de reserva.
-func (s *Server) invalidate() {
-	s.mu.Lock()
-	s.cache = make(map[int]cacheEntry)
-	s.mu.Unlock()
-	go s.refresh(defaultDays)
+	return s.plain
 }
 
 func (s *Server) curate(classes []calendar.Class) []calendar.Class {
@@ -315,7 +380,14 @@ func (s *Server) curate(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// ---- helpers ----
+// invalidate vacía las cachés tras reservar/cancelar y reprecarga.
+func (s *Server) Invalidate() {
+	s.mu.Lock()
+	s.days = map[string]dayEntry{}
+	s.booked = map[string]dayEntry{}
+	s.mu.Unlock()
+	go s.warm()
+}
 
 func clampDays(raw string) int {
 	d, err := strconv.Atoi(raw)
@@ -328,7 +400,11 @@ func clampDays(raw string) int {
 	return d
 }
 
-// weekdayOf devuelve el día de la semana (0=Domingo) de una fecha YYYY-MM-DD.
+func validDate(d string) bool {
+	_, err := time.Parse("2006-01-02", d)
+	return err == nil
+}
+
 func weekdayOf(date string) (int, bool) {
 	t, err := time.Parse("2006-01-02", date)
 	if err != nil {

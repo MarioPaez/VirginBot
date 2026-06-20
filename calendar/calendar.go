@@ -46,7 +46,11 @@ type Class struct {
 	Studio    string `json:"studio"`    // p. ej. "Studio Cycle"
 	BookingID int    `json:"bookingId"` // p. ej. 374638 (para BookClass)
 	Center    int    `json:"center"`    // p. ej. 209 (bookingCenter)
-	Booked    bool   `json:"booked"`    // true si la sesión ya está reservada (auth)
+	Booked    bool   `json:"booked"`    // true si ya está reservada (= Status "booked")
+	// Status (calendario autenticado): "bookable" (hueco libre, plazo abierto),
+	// "booked" (reservada por mí), "waitlist" (llena, lista de espera),
+	// "unavailable" (plazo no abierto / demasiado tarde / conflicto / sin sesión).
+	Status string `json:"status"`
 }
 
 // jfilterResponse es la respuesta JSON del endpoint JFilter.
@@ -61,6 +65,16 @@ const maxConcurrency = 6
 // maxRetries reintenta cada página ante errores transitorios (timeouts del
 // backend lento bajo carga).
 const maxRetries = 3
+
+// pageBatch: páginas que se piden en paralelo dentro de un mismo día (acelera
+// mucho el primer pintado). pageConcurrency acota el TOTAL de peticiones de
+// página simultáneas en todo el proceso, para no saturar el backend.
+const (
+	pageBatch       = 4
+	pageConcurrency = 8
+)
+
+var pageSem = make(chan struct{}, pageConcurrency)
 
 // FetchRange devuelve las clases de los clubes indicados para `days` días
 // consecutivos a partir de `start` (incluido). Los días se piden en paralelo
@@ -102,20 +116,41 @@ func FetchRange(client *http.Client, clubIDs, classIDs []string, start time.Time
 	return all, nil
 }
 
-// FetchDay devuelve todas las clases de un único día, recorriendo las páginas
-// del scroll infinito hasta agotarlas.
+// FetchDay devuelve todas las clases de un único día. Pide las páginas en lotes
+// paralelos (pageBatch) y para en cuanto un lote trae una página incompleta (la
+// última). Las peticiones se acotan globalmente con pageSem.
 func FetchDay(client *http.Client, clubIDs, classIDs []string, day time.Time) ([]Class, error) {
 	date := day.Format("2006-01-02")
 	var classes []Class
-	for page := 1; ; page++ {
-		raw, err := fetchPage(client, clubIDs, classIDs, date, page)
-		if err != nil {
-			return nil, err
+
+	for next := 1; ; next += pageBatch {
+		raws := make([]string, pageBatch)
+		errs := make([]error, pageBatch)
+		var wg sync.WaitGroup
+		for j := 0; j < pageBatch; j++ {
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				pageSem <- struct{}{}
+				defer func() { <-pageSem }()
+				raws[j], errs[j] = fetchPage(client, clubIDs, classIDs, date, next+j)
+			}(j)
 		}
-		parsed := parseClasses(raw, date)
-		classes = append(classes, parsed...)
-		// Una página con menos de pageSize clases es la última.
-		if len(parsed) < pageSize {
+		wg.Wait()
+
+		last := false
+		for j := 0; j < pageBatch; j++ {
+			if errs[j] != nil {
+				return nil, errs[j]
+			}
+			parsed := parseClasses(raws[j], date)
+			classes = append(classes, parsed...)
+			if len(parsed) < pageSize { // página incompleta = última
+				last = true
+				break
+			}
+		}
+		if last {
 			break
 		}
 	}
@@ -170,6 +205,7 @@ func doFetchPage(client *http.Client, u string) (string, error) {
 var reTime = regexp.MustCompile(`\d{2}:\d{2}`)
 var reDuration = regexp.MustCompile(`\d+\s*min\.?`)
 var reBtnID = regexp.MustCompile(`(\d+)c(\d+)`)
+var reCall = regexp.MustCompile(`\((\d+),\s*(\d+)`) // bookClass(id,center) / unbookClass / overlappop
 
 // parseClasses extrae las clases de un fragmento HTML de class_calendar.
 func parseClasses(htmlFragment, date string) []Class {
@@ -215,20 +251,39 @@ func parseClassLine(line *html.Node, date string) Class {
 	}
 
 	if btn := firstWithClass(line, "calendarButton"); btn != nil {
-		// El botón (o enlace) lleva id "<bookingId>c<center>", presente con o
-		// sin sesión. Con sesión, la clase "btn-unbook" indica ya reservada.
 		el := firstTag(btn, "button")
 		if el == nil {
 			el = firstTag(btn, "a")
 		}
 		if el != nil {
-			if m := reBtnID.FindStringSubmatch(attrVal(el, "id")); m != nil {
+			// bookingId/center: del onclick bookClass/unbookClass/overlappop, o
+			// del id "<bookingId>c<center>" (los botones de lista de espera no
+			// llevan id, solo el onclick).
+			if m := reCall.FindStringSubmatch(attrVal(el, "onclick")); m != nil {
+				c.BookingID, _ = strconv.Atoi(m[1])
+				c.Center, _ = strconv.Atoi(m[2])
+			} else if m := reBtnID.FindStringSubmatch(attrVal(el, "id")); m != nil {
 				c.BookingID, _ = strconv.Atoi(m[1])
 				c.Center, _ = strconv.Atoi(m[2])
 			}
-			c.Booked = strings.Contains(attrVal(el, "class"), "btn-unbook")
+			c.Status = buttonStatus(attrVal(el, "class"))
+			c.Booked = c.Status == "booked"
 		}
 	}
 
 	return c
+}
+
+// buttonStatus traduce las clases CSS del botón al estado de reserva.
+func buttonStatus(class string) string {
+	switch {
+	case hasToken(class, "btn-unbook"):
+		return "booked"
+	case hasToken(class, "btn-book"):
+		return "bookable"
+	case hasToken(class, "btb-wait"): // sí, "btb" (typo en su código): lista de espera
+		return "waitlist"
+	default:
+		return "unavailable"
+	}
 }

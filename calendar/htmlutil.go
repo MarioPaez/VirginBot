@@ -21,8 +21,13 @@ func hasClass(n *html.Node, cls string) bool {
 	if n.Type != html.ElementNode {
 		return false
 	}
-	for _, f := range strings.Fields(attrVal(n, "class")) {
-		if f == cls {
+	return hasToken(attrVal(n, "class"), cls)
+}
+
+// hasToken indica si una cadena de clases CSS contiene el token exacto.
+func hasToken(classAttr, token string) bool {
+	for _, f := range strings.Fields(classAttr) {
+		if f == token {
 			return true
 		}
 	}
