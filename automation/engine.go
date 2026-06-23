@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,22 +17,31 @@ import (
 // hora de la clase. Por eso solo intentamos en esos instantes —a la hora de la
 // lección, cada día desde la apertura hasta 24h antes— en vez de machacar a
 // Virgin cada pocos minutos (ineficiente y motivo de bloqueo).
+// Parámetros del disparo. El plazo de Virgin a veces se habilita unos segundos
+// DESPUÉS de la hora exacta de la clase, así que damos un margen inicial y varios
+// intentos espaciados. Tunables por env (VIRGINBOT_ATTEMPTS/GAP_SEC/LEAD_SEC) sin
+// recompilar, porque el retardo real es empírico.
 const (
-	attemptRounds = 2                // intentos por disparo (el 2º cubre un fallo transitorio o un retardo en abrir)
-	attemptGap    = 8 * time.Second  // espera entre intentos del mismo disparo
-	maxIdle       = 5 * time.Minute  // re-evalúa la agenda (sin red) para captar reglas nuevas
-	triggerGrace  = 15 * time.Minute // un disparo solo cuenta si estamos a <=15min de su hora (no recupera disparos viejos)
-	horizonDays   = 8                // cubre la ventana más larga (calistenia, 7 días)
+	defaultAttempts = 5                // intentos por disparo
+	defaultLeadSec  = 0                // margen tras la hora antes del 1er intento (0 = a la hora exacta)
+	defaultGap1Sec  = 5                // espera entre el 1er y el 2º intento
+	defaultGapSec   = 7                // espera entre los intentos siguientes
+	maxIdle         = 5 * time.Minute  // re-evalúa la agenda (sin red) para captar reglas nuevas
+	triggerGrace    = 15 * time.Minute // un disparo solo cuenta si estamos a <=15min de su hora (no recupera disparos viejos)
+	horizonDays     = 8                // cubre la ventana más larga (calistenia, 7 días)
 )
 
 // Engine ejecuta las reglas de TODOS los usuarios con disparos precisos.
 type Engine struct {
 	store    *Store
 	fetchDay func(userID int64, date string) ([]calendar.Class, error) // fetch fresco de un día (autenticado, curado)
-	book     func(userID int64, bookingID, center int) error
+	book     func(userID int64, clubID, classID, sessionID int, date string) error
 	notify   func(userID int64, subject, body string)
 	loc      *time.Location
-	gap      time.Duration // espera entre rondas de un intento (configurable en tests)
+	rounds   int           // intentos por disparo
+	lead     time.Duration // margen tras la hora antes del 1er intento
+	gap1     time.Duration // espera entre el 1er y el 2º intento
+	gap      time.Duration // espera entre los intentos siguientes
 	debug    bool          // VIRGINBOT_DEBUG: loguea cada evaluación (para observar en local)
 
 	mu    sync.Mutex
@@ -49,7 +59,7 @@ type occState struct {
 func NewEngine(
 	store *Store,
 	fetchDay func(int64, string) ([]calendar.Class, error),
-	book func(int64, int, int) error,
+	book func(int64, int, int, int, string) error,
 	notify func(int64, string, string),
 ) *Engine {
 	loc, err := time.LoadLocation("Europe/Rome")
@@ -61,10 +71,23 @@ func NewEngine(
 	}
 	return &Engine{
 		store: store, fetchDay: fetchDay, book: book, notify: notify, loc: loc,
-		gap:   attemptGap,
-		debug: os.Getenv("VIRGINBOT_DEBUG") != "",
-		state: map[string]*occState{},
+		rounds: envInt("VIRGINBOT_ATTEMPTS", defaultAttempts),
+		lead:   time.Duration(envInt("VIRGINBOT_LEAD_SEC", defaultLeadSec)) * time.Second,
+		gap1:   time.Duration(envInt("VIRGINBOT_GAP1_SEC", defaultGap1Sec)) * time.Second,
+		gap:    time.Duration(envInt("VIRGINBOT_GAP_SEC", defaultGapSec)) * time.Second,
+		debug:  os.Getenv("VIRGINBOT_DEBUG") != "",
+		state:  map[string]*occState{},
 	}
+}
+
+// envInt lee un entero positivo de una variable de entorno, o devuelve def.
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 // occ es una ocurrencia concreta de una regla (un día concreto) de un usuario.
@@ -181,6 +204,8 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 		return
 	}
 
+	log.Printf("automation: u%d ▶ DISPARO %s · %s @ %s (clase del %s) — intentando reservar",
+		o.rule.UserID, o.rule.Name, o.rule.Club, o.rule.Start, o.date)
 	e.attempt(o, st)
 	st.lastFired = dueT
 
@@ -203,31 +228,35 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 // La 2ª ronda cubre un fallo transitorio o un pequeño retardo en que Virgin marque
 // la clase reservable justo al abrir el plazo.
 func (e *Engine) attempt(o occ, st *occState) {
-	for round := 0; round < attemptRounds && !st.booked; round++ {
+	tag := fmt.Sprintf("u%d %s %s @ %s", o.rule.UserID, o.rule.Name, o.date, o.rule.Start)
+	if e.lead > 0 {
+		log.Printf("automation: %s — esperando %s tras la hora (el plazo a veces se habilita unos segundos tarde)", tag, e.lead)
+		time.Sleep(e.lead)
+	}
+	for round := 0; round < e.rounds && !st.booked; round++ {
 		classes, err := e.fetchDay(o.rule.UserID, o.date)
 		if err != nil {
 			st.lastError = err.Error()
-			log.Printf("automation: u%d fetch %s: %v", o.rule.UserID, o.date, err)
+			log.Printf("automation: %s — ronda %d/%d: ERROR al consultar el calendario: %v", tag, round+1, e.rounds, err)
 		} else {
 			c := findMatch(classes, o.rule)
-			if e.debug {
-				e.logClass(o, c)
-			}
 			switch {
 			case c == nil:
 				st.lastError = "no está en el calendario aún"
+				log.Printf("automation: %s — ronda %d/%d: la clase aún no está en el calendario", tag, round+1, e.rounds)
 			case c.Booked:
 				st.booked = true
+				log.Printf("automation: %s — ya estaba reservada, nada que hacer", tag)
 				return
-			case c.Status == "bookable" && c.BookingID != 0:
+			case c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0:
 				st.attempts++
-				if err := e.book(o.rule.UserID, c.BookingID, c.Center); err != nil {
+				log.Printf("automation: %s — ronda %d/%d: RESERVABLE (classId=%d sessionId=%d), reservando…", tag, round+1, e.rounds, c.ClassID, c.SessionID)
+				if err := e.book(o.rule.UserID, c.ClubID, c.ClassID, c.SessionID, o.date); err != nil {
 					st.lastError = err.Error()
-					log.Printf("automation: u%d book %s %s: %v", o.rule.UserID, o.rule.Name, o.date, err)
+					log.Printf("automation: %s — ronda %d/%d: FALLÓ la reserva: %v", tag, round+1, e.rounds, err)
 				} else {
 					st.booked = true
-					log.Printf("automation: ✓ u%d reservada %s %s %s @ %s",
-						o.rule.UserID, o.rule.Name, o.rule.Club, o.date, o.rule.Start)
+					log.Printf("automation: ✓ %s — RESERVADA (intento %d)", tag, st.attempts)
 					e.notify(o.rule.UserID,
 						fmt.Sprintf("VirginBot: ✓ reservada %s", o.rule.Name),
 						fmt.Sprintf("¡Reserva conseguida! Te he apuntado automáticamente:\n\n%s\nIntentos: %d\n\nNos vemos en clase 💪\n",
@@ -236,21 +265,23 @@ func (e *Engine) attempt(o occ, st *occState) {
 				}
 			default:
 				st.lastError = "no reservable (status=" + c.Status + ")"
+				log.Printf("automation: %s — ronda %d/%d: no reservable (status=%q, p. ej. llena o plazo no abierto)", tag, round+1, e.rounds, c.Status)
 			}
 		}
-		if round < attemptRounds-1 && e.gap > 0 {
-			time.Sleep(e.gap)
+		if round < e.rounds-1 {
+			wait := e.gap // 7s entre los intentos siguientes
+			if round == 0 {
+				wait = e.gap1 // 5s entre el 1º y el 2º
+			}
+			if wait > 0 {
+				log.Printf("automation: %s — esperando %s para la ronda %d/%d", tag, wait, round+2, e.rounds)
+				time.Sleep(wait)
+			}
 		}
 	}
-}
-
-func (e *Engine) logClass(o occ, c *calendar.Class) {
-	if c == nil {
-		log.Printf("[debug] u%d %s %s @ %s — no está en el calendario aún", o.rule.UserID, o.rule.Name, o.date, o.rule.Start)
-		return
+	if !st.booked {
+		log.Printf("automation: %s — disparo terminado SIN reservar tras %d rondas (último motivo: %s)", tag, e.rounds, st.lastError)
 	}
-	log.Printf("[debug] u%d %s %s @ %s — status=%q booked=%v bookingId=%d",
-		o.rule.UserID, o.rule.Name, o.date, o.rule.Start, c.Status, c.Booked, c.BookingID)
 }
 
 // untilNext devuelve cuánto dormir: hasta el próximo disparo, o maxIdle si está

@@ -7,3 +7,6 @@ automations.json
 credentials.enc
 virginbot.db
 virginbot.db-*
+
+# Logs
+logs/

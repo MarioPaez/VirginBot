@@ -2,10 +2,7 @@ module github.com/MarioPaez/VirginBot
 
 go 1.26
 
-require (
-	golang.org/x/net v0.56.0
-	modernc.org/sqlite v1.53.0
-)
+require modernc.org/sqlite v1.53.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

@@ -30,15 +30,19 @@ func TestMigrateRealDB(t *testing.T) {
 	}
 	defer d.Close()
 
-	// Tablas nuevas presentes.
-	for _, tbl := range []string{"users", "bookings", "automations", "sessions", "day_cache"} {
+	// Tablas presentes.
+	for _, tbl := range []string{"users", "bookings", "automations", "sessions"} {
 		if ok, _ := tableExists(d, tbl); !ok {
 			t.Errorf("falta la tabla %q tras migrar", tbl)
 		}
 	}
+	// La caché de calendario en BD ya no existe (calendario en vivo desde vapi).
+	if ok, _ := tableExists(d, "day_cache"); ok {
+		t.Errorf("day_cache debería haberse eliminado")
+	}
 	// Columnas user_id añadidas.
 	for _, tc := range []struct{ table, col string }{
-		{"automations", "user_id"}, {"sessions", "user_id"}, {"day_cache", "user_id"},
+		{"automations", "user_id"}, {"sessions", "user_id"},
 	} {
 		if ok, _ := hasColumn(d, tc.table, tc.col); !ok {
 			t.Errorf("%s no tiene la columna %s", tc.table, tc.col)

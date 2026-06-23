@@ -9,7 +9,6 @@ import (
 
 	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/automation"
-	"github.com/MarioPaez/VirginBot/booking"
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/db"
 	"github.com/MarioPaez/VirginBot/notification"
@@ -54,7 +53,12 @@ func main() {
 			}
 		}
 	}
-	auth := server.NewAuth(acc)
+	apiKey := os.Getenv("VA_API_KEY")
+	if apiKey == "" {
+		log.Fatal("VA_API_KEY no definido: es la clave estática de la app móvil de Virgin (header x-api-key). " +
+			"Ponla en el entorno (.env en local, secret en el hosting).")
+	}
+	auth := server.NewAuth(acc, apiKey)
 
 	if al := strings.TrimSpace(os.Getenv("VA_ALLOWED_EMAILS")); al != "" {
 		log.Printf("acceso restringido: %d email(s) en la allowlist", len(strings.Split(al, ",")))
@@ -62,26 +66,30 @@ func main() {
 		log.Println("acceso ABIERTO: cualquier cuenta Virgin válida puede registrarse (define VA_ALLOWED_EMAILS para restringir)")
 	}
 
-	clubs := []string{calendar.ClubCorsoComo, calendar.ClubPiazzaCavour}
-	classIDs := []string{
-		calendar.ClassCalisthenics,
-		calendar.ClassCalisthenicsPerf,
-		calendar.ClassCalisthenicsFloor,
-		calendar.ClassSolarium,
-	}
-	// Calistenia (ambos clubes) + Solarium solo en Corso Como.
+	clubs := []int{calendar.ClubCorsoComo, calendar.ClubCavour}
+	// Clases que mostramos: calistenia, pilates (reformer), full body, TRX y cycle
+	// en ambos clubes; solarium solo en Corso Como.
 	keep := func(c calendar.Class) bool {
 		name := strings.ToLower(c.Name)
-		if strings.Contains(name, "calisthenics") {
+		switch {
+		case strings.Contains(name, "calisthenics"),
+			strings.Contains(name, "reformer"),
+			strings.Contains(name, "pilates"),
+			strings.Contains(name, "full body"),
+			strings.Contains(name, "trx"),
+			strings.Contains(name, "cycle"):
 			return true
+		case strings.Contains(name, "solarium"):
+			return strings.Contains(c.Club, "Corso Como")
+		default:
+			return false
 		}
-		return strings.Contains(name, "solarium") && strings.Contains(c.Club, "Corso Como")
 	}
 
 	store := automation.NewStore(database)
 
 	sender := notification.FromEnv()
-	srv := server.New(database, auth, acc, clubs, classIDs, keep, store, sender)
+	srv := server.New(database, auth, acc, clubs, keep, store, sender)
 
 	// notifyUser dirige cada aviso al email del usuario correspondiente.
 	notifyUser := func(userID int64, subject, body string) {
@@ -92,12 +100,12 @@ func main() {
 
 	// Motor de automatización: sondea con timing preciso (fetch fresco por día y
 	// usuario), reserva con el cliente autenticado de cada usuario y avisa por email.
-	engine := automation.NewEngine(store, srv.FreshDayFor, func(userID int64, bookingID, center int) error {
+	engine := automation.NewEngine(store, srv.FreshDayFor, func(userID int64, clubID, classID, sessionID int, date string) error {
 		client, err := auth.ClientFor(userID)
 		if err != nil {
 			return err
 		}
-		if err := booking.Book(client, bookingID, center); err != nil {
+		if err := client.Book(clubID, classID, sessionID, date); err != nil {
 			return err
 		}
 		srv.InvalidateUser(userID) // refresca reservas (reconcilia la tabla bookings) y calendario

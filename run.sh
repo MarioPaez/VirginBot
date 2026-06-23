@@ -12,7 +12,12 @@ fi
 ADDR="${ADDR:-:8080}"
 URL="http://localhost${ADDR}"
 
+mkdir -p logs
+LOG="logs/virginbot-$(date +%Y%m%d-%H%M%S).log"
+
 echo "▶  Arrancando VirginBot en ${URL}"
+echo "📝 Logs (terminal + fichero): ${LOG}"
+echo "   Para activar el detalle máximo: VIRGINBOT_DEBUG=1 ./run.sh"
 
 # Abre el navegador cuando el servidor esté escuchando (en 2º plano).
 (
@@ -25,4 +30,5 @@ echo "▶  Arrancando VirginBot en ${URL}"
   done
 ) &
 
-ADDR="${ADDR}" go run .
+# tee: muestra los logs y los guarda en el fichero para analizarlos luego.
+ADDR="${ADDR}" go run . 2>&1 | tee "${LOG}"

@@ -1,3 +1,9 @@
+> ⚠️ **HISTÓRICO / OBSOLETO.** Esto documenta el método original de *scraping* de
+> la web (`www.virginactive.it`), que **ya no se usa**. El bot migró a la API
+> móvil moderna `vapi.virginactive.com` (ver el **README**, sección
+> *The reverse‑engineering story*). Se conserva como registro de investigación.
+> La lista de **Mejoras** al final sí sigue vigente.
+
 # Interest URLs
 
 ## Login
@@ -46,8 +52,11 @@ VA_PASS: {yourpassword}
 
 ## Mejoras
 
-- Añadir las clases de Pilates para Carmen.
-- Añadir i18n automática, inglés, español e Italiano.
-- Añadir logo de la aplicación.
-- Investigar herramienta de Claude para realizar interfaces de usuario sotisficadas.
-- 
+- [ ] Añadir las clases de Pilates para Carmen.
+- [ ] Añadir i18n automática, inglés, español e Italiano.
+- [x] ~~Añadir logo de la aplicación~~ (rayo en placa roja: `server/web/logo.svg`, favicon + cabecera + login).
+- [ ] Investigar herramienta de Claude para realizar interfaces de usuario sofisticadas.
+- [x] ~~Feedback al realizar una automatización~~ (intento inmediato al automatizar + "próximo intento" en el tab + emails de resultado).
+- [x] ~~Añadir un How to de cómo funciona la aplicación~~ (README).
+- [x] ~~Check de la hora en la máquina de Fly~~ (zona horaria `Europe/Rome` embebida en el binario con `time/tzdata`; no depende del reloj/tz del host).
+- [ ] Posibilidad de hacer un bot de WhatsApp en lugar de (o además de) el correo.

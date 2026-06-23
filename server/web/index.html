@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
 <title>VirginBot · Calendario corsi</title>
 <style>
   :root { --red:#e2231a; --green:#1faa59; --bg:#0f1115; --card:#1a1d24; --muted:#8b93a1; --line:#2a2e38; }
@@ -12,6 +13,8 @@
   .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   h1 { font-size:18px; margin:0; font-weight:700; }
   h1 span { color:var(--red); }
+  .logo { width:30px; height:30px; border-radius:8px; display:block; flex:none; }
+  .logo-lg { width:60px; height:60px; border-radius:15px; display:block; margin:0 auto 2px; }
   .meta { color:var(--muted); font-size:13px; margin-left:auto; }
   .tabs { display:flex; gap:4px; margin-top:14px; }
   .tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted);
@@ -35,14 +38,15 @@
   tr.booked td { background:rgba(31,170,89,.08); }
   .time { font-variant-numeric:tabular-nums; color:#fff; font-weight:600; white-space:nowrap; }
   .name { font-weight:600; }
-  .club, .studio { color:var(--muted); white-space:nowrap; }
+  .club, .studio, .instr { color:var(--muted); white-space:nowrap; }
   .actions { text-align:right; white-space:nowrap; }
   /* Tablas del calendario: ancho de columnas fijo e idéntico en todos los días
      para que la columna "club" quede siempre alineada (no escalonada). */
   table.grid { table-layout:fixed; }
   table.grid td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  table.grid .time { width:108px; }
-  table.grid .club { width:170px; }
+  table.grid .time { width:132px; }
+  table.grid .club { width:150px; }
+  table.grid .instr { width:150px; }
   table.grid .actions { width:188px; }
   .btn { border:1px solid var(--line); background:var(--card); color:#e9ecf1; border-radius:8px;
          padding:5px 12px; cursor:pointer; font-size:13px; }
@@ -82,6 +86,7 @@
 <body>
 <header>
   <div class="top">
+    <img src="/logo.svg" class="logo" alt="VirginBot">
     <h1>Virgin<span>Bot</span> · Calendario corsi</h1>
     <div class="meta" id="meta"></div>
     <span class="user" id="user" title="Sesión iniciada"></span>
@@ -97,11 +102,7 @@
 <div class="controls" id="controls">
   <div class="chipgroup">
     <span class="grouplabel">Clase</span>
-    <div class="chips" id="classChips" data-key="q">
-      <button class="chip active" data-val="">Todas</button>
-      <button class="chip" data-val="calisthenics">Calisthenics</button>
-      <button class="chip" data-val="solarium">Solarium</button>
-    </div>
+    <div class="chips" id="classChips" data-multi="1"></div>
   </div>
   <div class="chipgroup">
     <span class="grouplabel">Club</span>
@@ -116,6 +117,7 @@
 
 <div id="login" class="login-overlay" style="display:none">
   <form class="login-card" onsubmit="doLogin(event)">
+    <img src="/logo.svg" class="logo-lg" alt="VirginBot">
     <h2>Virgin<span>Bot</span></h2>
     <p class="login-sub">Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.</p>
     <input id="li-email" type="email" placeholder="email" autocomplete="username" required>
@@ -129,9 +131,21 @@
 const DAYS = 10;
 const weekdays = ["Domenica","Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato"];
 const $ = s => document.querySelector(s);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 let all = [], autos = [], bookings = [], loadToken = 0;
-const state = { q: "", club: "", view: "calendar" };
+const state = { cats: new Set(), club: "", view: "calendar" };
+
+// Categoría amplia de una clase, para los filtros (varias clases → una categoría).
+const CATEGORIES = ["Calisthenics", "Pilates", "Solarium", "Full Body", "TRX", "Cycle"];
+function classCategory(name) {
+  const n = name.toLowerCase();
+  if (n.includes("calisthenics")) return "Calisthenics";
+  if (n.includes("reformer") || n.includes("pilates")) return "Pilates";
+  if (n.includes("solarium")) return "Solarium";
+  if (n.includes("full body")) return "Full Body";
+  if (n.includes("trx")) return "TRX";
+  if (n.includes("cycle")) return "Cycle";
+  return name;
+}
 
 const weekdayOf = date => new Date(date + "T00:00:00").getDay();
 const ruleFor = c => autos.find(r =>
@@ -151,36 +165,21 @@ async function load() {
   await loadCalendar(token);
 }
 
-// loadCalendar pide las fechas y luego cada día en paralelo, pintando cada uno
-// en cuanto llega (caché por día en el servidor: las recargas son instantáneas).
+// loadCalendar trae todo el calendario en UNA llamada (vapi acepta rango). El
+// navegador lo guarda en memoria (`all`); al cambiar de pestaña no se re-pide.
 async function loadCalendar(token) {
   all = [];
   $("#out").innerHTML = `<div class="loading">Cargando calendario…</div>`;
-  const { dates } = await (await fetch(`/api/dates?days=${DAYS}`)).json();
+  const res = await fetch(`/api/calendar?days=${DAYS}`);
   if (token !== loadToken) return;
-  let done = 0;
-  const addDay = async date => {
-    const classes = await fetchDay(`/api/day?date=${date}`);
-    if (token !== loadToken) return;
-    all.push(...classes);
-    $("#meta").textContent = `${all.length} clases · ${++done}/${dates.length} días`;
-    populateClubChips(all);
-    if (state.view === "calendar") render();
-  };
-  // Hoy primero (primer pintado rápido), luego el resto en paralelo.
-  await addDay(dates[0]);
-  await Promise.all(dates.slice(1).map(addDay));
-}
-
-// fetchDay pide un día, reintentando mientras el servidor responde 202 (cargando).
-async function fetchDay(url) {
-  for (let i = 0; i < 40; i++) {
-    const res = await fetch(url);
-    if (res.status === 200) return (await res.json()).classes || [];
-    if (res.status === 401) { showLogin(); return []; }
-    await sleep(1500);
-  }
-  return [];
+  if (res.status === 401) { showLogin(); return; }
+  if (!res.ok) { $("#out").innerHTML = `<div class="empty">No se pudo cargar el calendario. Reintenta.</div>`; return; }
+  const { days } = await res.json();
+  for (const d of (days || [])) all.push(...(d.classes || []));
+  $("#meta").textContent = `${all.length} clases · ${(days || []).length} días`;
+  populateClubChips(all);
+  populateClassChips(all);
+  if (state.view === "calendar") render();
 }
 
 function populateClubChips(list) {
@@ -190,11 +189,22 @@ function populateClubChips(list) {
     clubs.map(c => `<button class="chip${state.club===c?" active":""}" data-val="${c}">${c.replace(/^Milano\s+/i,"")}</button>`).join("");
 }
 
+// Chips de clase (multi-select acumulativo): solo las categorías presentes.
+function populateClassChips(list) {
+  const present = new Set(list.map(c => classCategory(c.name)));
+  const cats = CATEGORIES.filter(c => present.has(c)).concat([...present].filter(c => !CATEGORIES.includes(c)));
+  $("#classChips").innerHTML =
+    `<button class="chip${state.cats.size===0?" active":""}" data-val="">Todas</button>` +
+    cats.map(c => `<button class="chip${state.cats.has(c)?" active":""}" data-val="${c}">${c}</button>`).join("");
+}
+
 function render() {
   $("#controls").style.display = state.view === "calendar" ? "flex" : "none";
   if (state.view === "automations") return renderAutomations();
   if (state.view === "bookings") return renderClasses(bookings, true);
-  const rows = all.filter(c => (!state.q || c.name.toLowerCase().includes(state.q)) && (!state.club || c.club === state.club));
+  const rows = all.filter(c =>
+    (!state.cats.size || state.cats.has(classCategory(c.name))) &&
+    (!state.club || c.club === state.club));
   renderClasses(rows, false);
 }
 
@@ -229,36 +239,56 @@ function classRow(c) {
     <td class="time">${c.start}–${c.end}</td>
     <td class="name">${c.name}${c.booked?' <span class="badge ok">reservada</span>':''}</td>
     <td class="club">${c.club}</td>
+    <td class="instr">${c.instructor || "—"}</td>
     <td class="actions">${auto} &nbsp; ${action}</td>
   </tr>`;
 }
 
 function renderClasses(rows, isBookings) {
+  const tools = isBookings
+    ? `<div style="margin-top:16px"><button class="btn" onclick="refreshBookings()">🔄 Actualizar reservas</button></div>`
+    : "";
   if (!rows.length) {
-    $("#out").innerHTML = `<div class="empty">${isBookings?"No tienes reservas en los próximos días.":"Sin clases con esos filtros."}</div>`;
+    $("#out").innerHTML = tools + `<div class="empty">${isBookings?"No tienes reservas en los próximos días.":"Sin clases con esos filtros."}</div>`;
     return;
   }
   const byDay = {};
   for (const c of rows) (byDay[c.date] ??= []).push(c);
-  $("#out").innerHTML = Object.keys(byDay).sort().map(date =>
+  $("#out").innerHTML = tools + Object.keys(byDay).sort().map(date =>
     `<div class="day"><h2>${weekdays[weekdayOf(date)]} · ${date} <span style="color:var(--muted)">(${byDay[date].length})</span></h2>
      <table class="grid">${byDay[date].map(classRow).join("")}</table></div>`).join("");
 }
 
-// nextOccurrence calcula la próxima fecha de una regla (su día de la semana),
-// saltando a la semana siguiente si hoy es ese día pero la hora ya pasó.
-function nextOccurrence(r) {
-  const now = new Date();
-  const d = new Date(now); d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + ((r.weekday - d.getDay() + 7) % 7));
-  if (d.toDateString() === now.toDateString()) {
-    const [h, m] = r.start.split(":").map(Number);
-    if (now.getHours() * 60 + now.getMinutes() > h * 60 + m) d.setDate(d.getDate() + 7);
+// refreshBookings fuerza un re-escaneo de las reservas en el servidor (consistente
+// con Virgin) y recarga también las automatizaciones, porque una reserva nueva
+// puede dejar sin sentido la automatización de esa misma lección.
+async function refreshBookings() {
+  $("#out").innerHTML = `<div class="loading">Actualizando reservas… (puede tardar unos segundos)</div>`;
+  try {
+    await fetch("/api/bookings/refresh", { method: "POST" });
+  } catch (e) { toast("Error: " + e, true); return; }
+  // El escaneo (todas las clases) reconcilia en 2º plano; sondeamos un rato.
+  for (let i = 0; i < 12 && state.view === "bookings"; i++) {
+    await new Promise(r => setTimeout(r, 4000));
+    if (state.view !== "bookings") return;
+    bookings = (await (await fetch("/api/bookings")).json()) || [];
+    renderClasses(bookings, true);
   }
-  return d;
+  autos = (await (await fetch("/api/automations")).json()) || []; // una reserva puede dejar sin sentido su automatización
+  toast("Reservas actualizadas ✓");
+}
+
+// loadAutomations recarga las reglas (con su próximo intento ya recalculado,
+// saltando las lecciones que ya tienes reservadas).
+async function loadAutomations() {
+  try { autos = (await (await fetch("/api/automations")).json()) || []; } catch (e) {}
+  if (state.view === "automations") renderAutomations();
 }
 
 const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+const fmtItDateTime = iso => capitalize(new Date(iso).toLocaleString("it-IT", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }));
+const fmtItDate = ymd => capitalize(new Date(ymd + "T00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" }));
 
 function renderAutomations() {
   if (!autos.length) {
@@ -266,14 +296,17 @@ function renderAutomations() {
     return;
   }
   $("#out").innerHTML = `<div class="day"><table>` + autos.map(r => {
-    const next = capitalize(nextOccurrence(r).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" }));
+    const info = r.nextAttempt
+      ? `próximo intento: ${fmtItDateTime(r.nextAttempt)}`
+      : `sin próximas peticiones`;
+    const cls = r.nextClass ? `<br><small style="color:var(--muted)">clase: ${fmtItDate(r.nextClass)}</small>` : "";
     return `<tr><td class="time">${r.start}</td>
       <td class="name">${r.name}</td>
       <td class="club">${r.club}</td>
-      <td class="studio">próxima: ${next} · abre ${r.opensDaysBefore}d antes</td>
+      <td class="studio">${info}${cls}</td>
       <td class="actions"><button class="btn btn-cancel" onclick="removeAuto('${r.id}')">Quitar</button></td>`;
   }).join("") + `</table></div>
-    <div class="empty" style="text-align:left;font-size:13px">Cada semana intenta reservar en cuanto abre el plazo (calistenia 7 días antes, solarium 2) y reintenta si está llena hasta conseguir hueco.</div>`;
+    <div class="empty" style="text-align:left;font-size:13px">Cada semana intenta reservar a la hora de la clase desde que abre el plazo (calistenia 7 días antes, solarium 2) hasta 24h antes.</div>`;
 }
 
 // ---- acciones ----
@@ -317,9 +350,19 @@ async function removeAuto(id) {
 document.querySelectorAll(".chips").forEach(group => {
   group.addEventListener("click", e => {
     const chip = e.target.closest(".chip"); if (!chip) return;
-    group.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
-    chip.classList.add("active");
-    state[group.dataset.key] = chip.dataset.val;
+    if (group.dataset.multi) {
+      // Multi-select acumulativo (Clase): "Todas" limpia; cada categoría alterna.
+      const val = chip.dataset.val;
+      if (val === "") state.cats.clear();
+      else if (state.cats.has(val)) state.cats.delete(val);
+      else state.cats.add(val);
+      populateClassChips(all);
+    } else {
+      // Single-select (Club).
+      group.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      state[group.dataset.key] = chip.dataset.val;
+    }
     render();
   });
 });
@@ -330,6 +373,7 @@ document.querySelectorAll(".tab").forEach(t =>
     state.view = t.dataset.view;
     render();
     if (state.view === "bookings") loadBookings();
+    else if (state.view === "automations") loadAutomations();
   }));
 
 // ---- login ----

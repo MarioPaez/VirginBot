@@ -36,14 +36,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id INTEGER NOT NULL,
     created TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS day_cache (
-    kind       TEXT NOT NULL,
-    date       TEXT NOT NULL,
-    user_id    INTEGER NOT NULL,
-    classes    TEXT NOT NULL,
-    fetched_at INTEGER NOT NULL,
-    PRIMARY KEY (kind, date, user_id)
-);
 CREATE TABLE IF NOT EXISTS bookings (
     user_id    INTEGER NOT NULL,
     name       TEXT NOT NULL,
@@ -51,8 +43,11 @@ CREATE TABLE IF NOT EXISTS bookings (
     date       TEXT NOT NULL,
     start      TEXT NOT NULL,
     end_time   TEXT NOT NULL DEFAULT '',
-    center     INTEGER NOT NULL,
-    booking_id INTEGER NOT NULL,
+    instructor TEXT NOT NULL DEFAULT '',
+    club_id    INTEGER NOT NULL DEFAULT 0,
+    class_id   INTEGER NOT NULL DEFAULT 0,
+    session_id INTEGER NOT NULL DEFAULT 0,
+    booking_id INTEGER NOT NULL DEFAULT 0,
     created    TEXT NOT NULL,
     PRIMARY KEY (user_id, name, club, date, start)
 );
@@ -90,7 +85,12 @@ func migrate(d *sql.DB) error {
 	if err := rebuildAutomations(d); err != nil {
 		return err
 	}
-	if err := dropLegacyDayCache(d); err != nil {
+	if err := dropLegacyBookings(d); err != nil {
+		return err
+	}
+	// La caché de calendario en BD ya no se usa (el calendario se sirve en vivo
+	// desde vapi); se elimina si existía de versiones anteriores.
+	if _, err := d.Exec(`DROP TABLE IF EXISTS day_cache`); err != nil {
 		return err
 	}
 
@@ -101,6 +101,15 @@ func migrate(d *sql.DB) error {
 
 	// 3) Columnas que sí se pueden añadir in situ a tablas legadas.
 	if err := ensureColumn(d, "sessions", "user_id", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	// Migración a vapi: ids necesarios para reservar/cancelar vía la API móvil.
+	for _, col := range []string{"club_id", "class_id", "session_id"} {
+		if err := ensureColumn(d, "bookings", col, "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if err := ensureColumn(d, "bookings", "instructor", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
@@ -145,24 +154,21 @@ func rebuildAutomations(d *sql.DB) error {
 	return execAll(d, stmts)
 }
 
-// dropLegacyDayCache elimina la caché de calendario si tiene la forma antigua
-// (sin user_id). Es caché regenerable: se vuelve a poblar sola.
-func dropLegacyDayCache(d *sql.DB) error {
-	exists, err := tableExists(d, "day_cache")
+// dropLegacyBookings borra la tabla bookings si tiene la forma antigua (columna
+// `center`, sin los ids de vapi). Es caché: se repuebla desde la API móvil.
+func dropLegacyBookings(d *sql.DB) error {
+	exists, err := tableExists(d, "bookings")
+	if err != nil || !exists {
+		return err
+	}
+	has, err := hasColumn(d, "bookings", "center")
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return nil
+	if !has {
+		return nil // ya está en la forma nueva
 	}
-	has, err := hasColumn(d, "day_cache", "user_id")
-	if err != nil {
-		return err
-	}
-	if has {
-		return nil
-	}
-	_, err = d.Exec(`DROP TABLE day_cache`)
+	_, err = d.Exec(`DROP TABLE bookings`)
 	return err
 }
 

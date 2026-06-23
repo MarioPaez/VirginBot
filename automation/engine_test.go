@@ -54,13 +54,15 @@ func TestFiresAtClassHourNotBefore(t *testing.T) {
 	fetch := func(int64, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
 			Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
-			Status: "bookable", BookingID: 123, Center: 209,
+			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
 		}}, nil
 	}
-	book := func(int64, int, int) error { books++; return nil }
+	book := func(int64, int, int, int, string) error { books++; return nil }
 	e := NewEngine(nil, fetch, book, nil)
 	e.loc = loc
 	e.gap = 0
+	e.gap1 = 0
+	e.lead = 0
 
 	// A media tarde del día del disparo, ANTES de las 18:15: no debe reservar.
 	e.maybeFire(o, time.Date(2026, 6, 23, 14, 0, 0, 0, loc))
@@ -89,10 +91,10 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	fetch := func(int64, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
 			Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
-			Status: "waitlist", BookingID: 123, Center: 209,
+			Status: "waitlist", ClubID: 209, ClassID: 387071, SessionID: 79403,
 		}}, nil
 	}
-	book := func(int64, int, int) error { return nil }
+	book := func(int64, int, int, int, string) error { return nil }
 	var failEmails int
 	notify := func(_ int64, subject, _ string) {
 		if strings.HasPrefix(subject, "VirginBot: ✗") {
@@ -102,6 +104,8 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	e := NewEngine(nil, fetch, book, notify)
 	e.loc = loc
 	e.gap = 0
+	e.gap1 = 0
+	e.lead = 0
 
 	// Disparo intermedio (T-2d 18:15): aún no avisa de fallo.
 	e.maybeFire(o, time.Date(2026, 6, 27, 18, 15, 1, 0, loc))
