@@ -138,5 +138,3 @@ The engine must run 24/7 (it can't "scale to zero"), so expect a small always‑
 - No secrets are committed; `.env`, the SQLite DB and capture files are git‑ignored.
 
 ---
-
-*Built iteratively with a lot of help from Claude. Not affiliated with or endorsed by Virgin Active.*
