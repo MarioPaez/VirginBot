@@ -522,12 +522,25 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.emailUser(userID,
-			fmt.Sprintf("VirginBot: automatización añadida — %s", rule.Name),
-			fmt.Sprintf("Nueva automatización activada. Reservaré esta clase automáticamente cada semana:\n\n%s\n\nLo intentaré en cuanto abra el plazo y te avisaré por aquí del resultado.\n",
-				rule.Summary(s.loc)),
-		)
-		writeJSON(w, rule)
+		// Intento inmediato sobre la ocurrencia marcada: si ya hay plaza, se
+		// reserva al momento; si no, la regla queda para los disparos diarios
+		// (a la hora de la clase) y para las próximas semanas.
+		booked := s.tryBookNow(userID, req)
+		if booked {
+			when, _ := time.ParseInLocation("2006-01-02 15:04", req.Date+" "+req.Start, s.loc)
+			s.emailUser(userID,
+				fmt.Sprintf("VirginBot: ✓ reservada %s", rule.Name),
+				fmt.Sprintf("¡Reserva conseguida al automatizar! Te he apuntado a:\n\nClase: %s\nClub: %s\nDía: %s\n\nLa automatización queda activa para reservar también las próximas semanas.\n",
+					req.Name, req.Club, automation.FormatDateTimeIT(when)),
+			)
+		} else {
+			s.emailUser(userID,
+				fmt.Sprintf("VirginBot: automatización añadida — %s", rule.Name),
+				fmt.Sprintf("Nueva automatización activada. Reservaré esta clase automáticamente cada semana:\n\n%s\n\nIntentaré reservar en cuanto abra el plazo (a la hora de la clase) y te avisaré del resultado.\n",
+					rule.Summary(s.loc)),
+			)
+		}
+		writeJSON(w, map[string]any{"rule": rule, "booked": booked})
 	case http.MethodDelete:
 		id := r.URL.Query().Get("id")
 		rule, found := s.store.Get(userID, id)
@@ -546,6 +559,25 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
 	}
+}
+
+// tryBookNow intenta reservar de inmediato la ocurrencia marcada al automatizar.
+// Devuelve true si quedó reservada. Si la plaza no está disponible (plazo no
+// abierto o llena), devuelve false y la regla la reintenta en los disparos diarios.
+func (s *Server) tryBookNow(userID int64, req bookRequest) bool {
+	if req.BookingID == 0 {
+		return false
+	}
+	client, err := s.auth.ClientFor(userID)
+	if err != nil {
+		return false
+	}
+	if err := booking.Book(client, req.BookingID, req.Center); err != nil {
+		return false
+	}
+	s.upsertBooking(userID, req.asClass())
+	s.InvalidateUser(userID)
+	return true
 }
 
 // ---- helpers ----

@@ -292,15 +292,18 @@ async function act(kind, c) {
 async function toggleAuto(c, on) {
   try {
     if (on) {
-      await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)});
-      toast("Automatización añadida ✓");
+      const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)})).json();
+      toast(res.booked ? "¡Reservada! ✓" : "Automatización añadida ✓");
+      autos = (await (await fetch(`/api/automations`)).json()) || [];
+      if (res.booked) { load(); return; } // recarga el calendario para reflejar la reserva
+      render();
     } else {
       const rule = ruleFor(c);
       if (rule) await fetch(`/api/automations?id=${rule.id}`, {method:"DELETE"});
       toast("Automatización quitada");
+      autos = (await (await fetch(`/api/automations`)).json()) || [];
+      render();
     }
-    autos = (await (await fetch(`/api/automations`)).json()) || [];
-    render();
   } catch (e) { toast("Error: " + e, true); }
 }
 

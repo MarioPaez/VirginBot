@@ -43,3 +43,11 @@ VA_PASS: {yourpassword}
 
 <textarea class="select2-search__field" type="search" tabindex="0" autocorrect="off" autocapitalize="none" spellcheck="false" role="searchbox" aria-autocomplete="list" autocomplete="off" aria-label="Search" aria-describedby="select2-ClubsNames-container" placeholder="Scegli il club" style="width: 100%;"></textarea>
 
+
+## Mejoras
+
+- Añadir las clases de Pilates para Carmen.
+- Añadir i18n automática, inglés, español e Italiano.
+- Añadir logo de la aplicación.
+- Investigar herramienta de Claude para realizar interfaces de usuario sotisficadas.
+- 
