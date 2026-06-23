@@ -5,43 +5,62 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	_ "time/tzdata" // embebe la base de zonas horarias (Europe/Rome) en el binario
 
 	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/booking"
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/db"
 	"github.com/MarioPaez/VirginBot/notification"
 	"github.com/MarioPaez/VirginBot/server"
 )
 
-const (
-	automationsFile = "automations.json"
-	credentialsFile = "credentials.enc"
-)
+const defaultDBFile = "virginbot.db"
 
 func main() {
+	loadDotEnv(".env") // carga el .env si existe (no pisa variables ya exportadas)
+
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
 
+	dbPath := os.Getenv("VIRGINBOT_DB") // ruta de la BD (volumen persistente en el hosting)
+	if dbPath == "" {
+		dbPath = defaultDBFile
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		log.Fatalf("abrir base de datos: %v", err)
+	}
+	defer database.Close()
+
 	secret := os.Getenv("APP_SECRET")
 	if secret == "" {
-		secret = "virginbot-default-secret"
-		log.Println("aviso: APP_SECRET no definido; usando clave por defecto (menos seguro)")
+		log.Fatal("APP_SECRET no definido: es obligatorio (cifra las contraseñas de los usuarios). " +
+			"Genera uno con `openssl rand -hex 32` y ponlo en el entorno (.env en local, secret en el hosting).")
 	}
-	acc, err := account.NewStore(credentialsFile, secret)
+	acc, err := account.NewStore(database, secret)
 	if err != nil {
-		log.Fatalf("almacén de credenciales: %v", err)
+		log.Fatalf("almacén de cuentas: %v", err)
 	}
-	// Compatibilidad: si no hay credenciales guardadas pero sí en el entorno,
-	// las sembramos (así sigue funcionando sin pasar por el login del FE).
-	if _, _, ok := acc.Get(); !ok {
+	// Compatibilidad: si no hay usuarios pero sí credenciales en el entorno, las
+	// sembramos como primer usuario (así arranca sin pasar por el login del FE).
+	if len(acc.ListUserIDs()) == 0 {
 		if e, p := os.Getenv("VA_EMAIL"), os.Getenv("VA_PASS"); e != "" && p != "" {
-			acc.Set(e, p)
+			if _, err := acc.Upsert(e, p); err != nil {
+				log.Printf("aviso: no se pudo sembrar el usuario inicial: %v", err)
+			}
 		}
 	}
 	auth := server.NewAuth(acc)
+
+	if al := strings.TrimSpace(os.Getenv("VA_ALLOWED_EMAILS")); al != "" {
+		log.Printf("acceso restringido: %d email(s) en la allowlist", len(strings.Split(al, ",")))
+	} else {
+		log.Println("acceso ABIERTO: cualquier cuenta Virgin válida puede registrarse (define VA_ALLOWED_EMAILS para restringir)")
+	}
 
 	clubs := []string{calendar.ClubCorsoComo, calendar.ClubPiazzaCavour}
 	classIDs := []string{
@@ -59,26 +78,31 @@ func main() {
 		return strings.Contains(name, "solarium") && strings.Contains(c.Club, "Corso Como")
 	}
 
-	store, err := automation.NewStore(automationsFile)
-	if err != nil {
-		log.Fatalf("no se pudieron cargar las automatizaciones: %v", err)
+	store := automation.NewStore(database)
+
+	sender := notification.FromEnv()
+	srv := server.New(database, auth, acc, clubs, classIDs, keep, store, sender)
+
+	// notifyUser dirige cada aviso al email del usuario correspondiente.
+	notifyUser := func(userID int64, subject, body string) {
+		if err := sender.Send(auth.Email(userID), subject, body); err != nil {
+			log.Printf("aviso email fallido (u%d): %v", userID, err)
+		}
 	}
 
-	srv := server.New(auth, clubs, classIDs, keep, store)
-
-	// Motor de automatización: sondea con timing preciso (fetch fresco por día),
-	// reserva con el cliente autenticado y avisa por email del resultado.
-	engine := automation.NewEngine(store, srv.FreshDay, func(bookingID, center int) error {
-		client, err := auth.Client()
+	// Motor de automatización: sondea con timing preciso (fetch fresco por día y
+	// usuario), reserva con el cliente autenticado de cada usuario y avisa por email.
+	engine := automation.NewEngine(store, srv.FreshDayFor, func(userID int64, bookingID, center int) error {
+		client, err := auth.ClientFor(userID)
 		if err != nil {
 			return err
 		}
 		if err := booking.Book(client, bookingID, center); err != nil {
 			return err
 		}
-		srv.Invalidate() // refresca el estado de reserva en el FE
+		srv.InvalidateUser(userID) // refresca reservas (reconcilia la tabla bookings) y calendario
 		return nil
-	}, notification.FromEnv())
+	}, notifyUser)
 	go engine.Run(make(chan struct{}))
 
 	log.Printf("API escuchando en http://localhost%s", addr)

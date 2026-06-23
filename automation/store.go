@@ -2,120 +2,162 @@ package automation
 
 import (
 	"crypto/sha1"
+	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"os"
-	"sync"
+	"log"
+	"strings"
 	"time"
 )
 
-// Rule define una clase recurrente a reservar automáticamente, identificada por
-// nombre + club + día de la semana + hora de inicio (el bookingId cambia en cada
-// ocurrencia, así que no sirve para identificar la regla).
+// Rule define una clase recurrente a reservar automáticamente para un usuario,
+// identificada por nombre + club + día de la semana + hora de inicio (el
+// bookingId cambia en cada ocurrencia, así que no sirve para identificar la regla).
 type Rule struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`    // p. ej. "Calisthenics Performance"
-	Club    string    `json:"club"`    // p. ej. "Milano Corso Como"
-	Weekday int       `json:"weekday"` // time.Weekday: 0=Domingo .. 6=Sábado
-	Start   string    `json:"start"`   // "HH:MM"
-	Enabled bool      `json:"enabled"`
-	Created time.Time `json:"created"`
+	UserID          int64     `json:"-"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Club            string    `json:"club"`
+	Weekday         int       `json:"weekday"` // time.Weekday: 0=Domingo .. 6=Sábado
+	Start           string    `json:"start"`   // "HH:MM"
+	OpensDaysBefore int       `json:"opensDaysBefore"`
+	Enabled         bool      `json:"enabled"`
+	Created         time.Time `json:"created"`
 }
 
-// key es la identidad lógica de una regla (sin contar el estado).
+// WindowDays indica con cuántos días de antelación abre el plazo de reserva
+// según el tipo de clase: la calistenia 7 días antes; el solarium, 2.
+func WindowDays(className string) int {
+	n := strings.ToLower(className)
+	switch {
+	case strings.Contains(n, "calisthenics"):
+		return 7
+	case strings.Contains(n, "solarium"):
+		return 2
+	default:
+		return 2
+	}
+}
+
 func ruleKey(name, club string, weekday int, start string) string {
 	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%s|%d|%s", name, club, weekday, start)))
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// Store persiste las reglas de automatización en un fichero JSON.
+// Store persiste las reglas de automatización (por usuario) en SQLite.
 type Store struct {
-	path  string
-	mu    sync.Mutex
-	rules []Rule
+	db *sql.DB
 }
 
-// NewStore carga las reglas existentes (si las hay) del fichero.
-func NewStore(path string) (*Store, error) {
-	s := &Store{path: path}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return s, nil
+func NewStore(db *sql.DB) *Store { return &Store{db: db} }
+
+const ruleCols = `user_id, id, name, club, weekday, start, opens_days_before, enabled, created`
+
+func scanRule(sc interface{ Scan(...any) error }) (Rule, error) {
+	var r Rule
+	var enabled int
+	var created string
+	if err := sc.Scan(&r.UserID, &r.ID, &r.Name, &r.Club, &r.Weekday, &r.Start,
+		&r.OpensDaysBefore, &enabled, &created); err != nil {
+		return Rule{}, err
 	}
+	r.Enabled = enabled != 0
+	r.Created, _ = time.Parse(time.RFC3339, created)
+	return r, nil
+}
+
+func (s *Store) insert(r Rule) error {
+	_, err := s.db.Exec(
+		`INSERT INTO automations (user_id, id, name, club, weekday, start, opens_days_before, enabled, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id, id) DO UPDATE SET enabled = 1, opens_days_before = excluded.opens_days_before`,
+		r.UserID, r.ID, r.Name, r.Club, r.Weekday, r.Start, r.OpensDaysBefore, boolToInt(r.Enabled),
+		r.Created.Format(time.RFC3339))
+	return err
+}
+
+// List devuelve las reglas de un usuario.
+func (s *Store) List(userID int64) []Rule {
+	rows, err := s.db.Query(
+		`SELECT `+ruleCols+` FROM automations WHERE user_id = ? ORDER BY created`, userID)
 	if err != nil {
-		return nil, fmt.Errorf("leer %s: %w", path, err)
+		log.Printf("listar automatizaciones: %v", err)
+		return []Rule{}
 	}
-	if err := json.Unmarshal(data, &s.rules); err != nil {
-		return nil, fmt.Errorf("parsear reglas: %w", err)
-	}
-	return s, nil
-}
-
-// List devuelve una copia de las reglas.
-func (s *Store) List() []Rule {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Rule, len(s.rules))
-	copy(out, s.rules)
-	return out
-}
-
-// Add inserta (o reactiva) una regla. Es idempotente: misma identidad lógica =
-// misma ID, no se duplica.
-func (s *Store) Add(name, club string, weekday int, start string) (Rule, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	id := ruleKey(name, club, weekday, start)
-	for i := range s.rules {
-		if s.rules[i].ID == id {
-			s.rules[i].Enabled = true
-			return s.rules[i], s.save()
-		}
-	}
-	r := Rule{ID: id, Name: name, Club: club, Weekday: weekday, Start: start, Enabled: true, Created: time.Now()}
-	s.rules = append(s.rules, r)
-	return r, s.save()
-}
-
-// Remove elimina una regla por ID.
-func (s *Store) Remove(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.removeLocked(id)
-}
-
-// RemoveMatching elimina la regla que coincide con la clase indicada (usado al
-// desapuntarse para que no se vuelva a automatizar). Devuelve true si borró algo.
-func (s *Store) RemoveMatching(name, club string, weekday int, start string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id := ruleKey(name, club, weekday, start)
-	for _, r := range s.rules {
-		if r.ID == id {
-			return true, s.removeLocked(id)
-		}
-	}
-	return false, nil
-}
-
-func (s *Store) removeLocked(id string) error {
-	out := s.rules[:0]
-	for _, r := range s.rules {
-		if r.ID != id {
+	defer rows.Close()
+	out := []Rule{} // no-nil: el JSON debe ser [] (no null) para el frontend
+	for rows.Next() {
+		if r, err := scanRule(rows); err == nil {
 			out = append(out, r)
 		}
 	}
-	s.rules = out
-	return s.save()
+	return out
 }
 
-// save escribe las reglas a disco (llamar con el lock tomado).
-func (s *Store) save() error {
-	data, err := json.MarshalIndent(s.rules, "", "  ")
+// ListAll devuelve todas las reglas de todos los usuarios (para el motor).
+func (s *Store) ListAll() []Rule {
+	rows, err := s.db.Query(`SELECT ` + ruleCols + ` FROM automations ORDER BY user_id, created`)
 	if err != nil {
-		return err
+		log.Printf("listar todas las automatizaciones: %v", err)
+		return nil
 	}
-	return os.WriteFile(s.path, data, 0o600)
+	defer rows.Close()
+	var out []Rule
+	for rows.Next() {
+		if r, err := scanRule(rows); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// Add inserta (o reactiva) una regla del usuario. Idempotente por identidad lógica.
+func (s *Store) Add(userID int64, name, club string, weekday int, start string) (Rule, error) {
+	r := Rule{
+		UserID: userID, ID: ruleKey(name, club, weekday, start), Name: name, Club: club,
+		Weekday: weekday, Start: start, OpensDaysBefore: WindowDays(name),
+		Enabled: true, Created: time.Now(),
+	}
+	if err := s.insert(r); err != nil {
+		return Rule{}, err
+	}
+	if got, ok := s.Get(userID, r.ID); ok {
+		return got, nil
+	}
+	return r, nil
+}
+
+// Get devuelve una regla del usuario por ID.
+func (s *Store) Get(userID int64, id string) (Rule, bool) {
+	row := s.db.QueryRow(
+		`SELECT `+ruleCols+` FROM automations WHERE user_id = ? AND id = ?`, userID, id)
+	r, err := scanRule(row)
+	if err != nil {
+		return Rule{}, false
+	}
+	return r, true
+}
+
+// Remove elimina una regla del usuario por ID.
+func (s *Store) Remove(userID int64, id string) error {
+	_, err := s.db.Exec(`DELETE FROM automations WHERE user_id = ? AND id = ?`, userID, id)
+	return err
+}
+
+// RemoveMatching elimina la regla de la clase indicada (al desapuntarse).
+func (s *Store) RemoveMatching(userID int64, name, club string, weekday int, start string) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM automations WHERE user_id = ? AND id = ?`,
+		userID, ruleKey(name, club, weekday, start))
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

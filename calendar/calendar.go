@@ -1,8 +1,10 @@
 package calendar
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -62,16 +64,16 @@ type jfilterResponse struct {
 // backend remoto y sus respuestas empiezan a superar el timeout del cliente.
 const maxConcurrency = 6
 
-// maxRetries reintenta cada página ante errores transitorios (timeouts del
-// backend lento bajo carga).
-const maxRetries = 3
+// maxRetries reintenta cada página ante errores transitorios (timeouts o
+// páginas de error/límite del backend que devuelven HTML en vez de JSON).
+const maxRetries = 4
 
-// pageBatch: páginas que se piden en paralelo dentro de un mismo día (acelera
-// mucho el primer pintado). pageConcurrency acota el TOTAL de peticiones de
-// página simultáneas en todo el proceso, para no saturar el backend.
+// pageBatch: páginas que se piden en paralelo dentro de un mismo día. Más bajo
+// = más suave con Virgin (evita que su WAF devuelva páginas de error bajo
+// ráfaga). pageConcurrency acota el TOTAL de peticiones simultáneas.
 const (
-	pageBatch       = 4
-	pageConcurrency = 8
+	pageBatch       = 3
+	pageConcurrency = 5
 )
 
 var pageSem = make(chan struct{}, pageConcurrency)
@@ -176,7 +178,8 @@ func fetchPage(client *http.Client, clubIDs, classIDs []string, date string, pag
 			return html, nil
 		}
 		lastErr = err
-		time.Sleep(time.Duration(attempt) * time.Second) // backoff lineal
+		// Backoff exponencial: 2s, 4s, 8s… (da margen a que pase un límite temporal).
+		time.Sleep(time.Duration(1<<attempt) * time.Second)
 	}
 	return "", fmt.Errorf("tras %d intentos: %w", maxRetries, lastErr)
 }
@@ -185,18 +188,28 @@ func doFetchPage(client *http.Client, u string) (string, error) {
 	req, _ := http.NewRequest(http.MethodGet, u, nil)
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Referer", "https://www.virginactive.it/calendario-corsi")
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("GET JFilter: %w", err)
 	}
 	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("leer respuesta: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("JFilter devolvió %s", resp.Status)
 	}
-
+	// Bajo ráfaga, Virgin a veces devuelve una página de error en HTML en vez
+	// del JSON esperado: lo tratamos como fallo transitorio (reintentable).
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 || body[0] != '{' {
+		return "", fmt.Errorf("respuesta no-JSON (posible límite temporal de Virgin)")
+	}
 	var jr jfilterResponse
-	if err := json.NewDecoder(resp.Body).Decode(&jr); err != nil {
+	if err := json.Unmarshal(body, &jr); err != nil {
 		return "", fmt.Errorf("decodificar JSON: %w", err)
 	}
 	return jr.ClassCalendar, nil

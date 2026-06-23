@@ -5,3 +5,5 @@
 .env
 automations.json
 credentials.enc
+virginbot.db
+virginbot.db-*

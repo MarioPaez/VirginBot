@@ -8,30 +8,34 @@ import (
 	"strings"
 )
 
-// Notifier envía un aviso (p. ej. el resultado de una reserva automática).
-type Notifier interface {
-	Notify(subject, body string) error
+// Sender envía un aviso por email. El destinatario se pasa en cada llamada para
+// poder dirigir cada correo al usuario correspondiente (la app es multi-usuario
+// y comparte un único transporte SMTP).
+type Sender interface {
+	Send(to, subject, body string) error
 }
 
 // NoOp no envía nada (cuando no hay SMTP configurado).
 type NoOp struct{}
 
-func (NoOp) Notify(string, string) error { return nil }
+func (NoOp) Send(string, string, string) error { return nil }
 
-// SMTP envía emails por SMTP (p. ej. Gmail con app password).
+// SMTP envía emails por un servidor SMTP compartido (p. ej. Brevo).
 type SMTP struct {
-	host, port, user, pass, from, to string
+	host, port, user, pass, from string
+	override                     string // SMTP_TO: fuerza el destinatario (pruebas)
 }
 
-// FromEnv construye un notificador SMTP a partir de variables de entorno, o
-// NoOp si no están configuradas. Variables: SMTP_HOST, SMTP_PORT (def. 587),
-// SMTP_USER, SMTP_PASS, SMTP_FROM (def. SMTP_USER), SMTP_TO.
-func FromEnv() Notifier {
+// FromEnv construye un Sender SMTP a partir de variables de entorno, o NoOp si
+// faltan las obligatorias (SMTP_HOST, SMTP_USER, SMTP_PASS).
+//
+// SMTP_FROM debe ser un remitente verificado en el proveedor. SMTP_TO, si se
+// define, fuerza el destinatario de TODOS los correos (útil en pruebas).
+func FromEnv() Sender {
 	host := os.Getenv("SMTP_HOST")
 	user := os.Getenv("SMTP_USER")
 	pass := os.Getenv("SMTP_PASS")
-	to := os.Getenv("SMTP_TO")
-	if host == "" || user == "" || pass == "" || to == "" {
+	if host == "" || user == "" || pass == "" {
 		log.Println("notificaciones email desactivadas (faltan variables SMTP_*)")
 		return NoOp{}
 	}
@@ -43,14 +47,25 @@ func FromEnv() Notifier {
 	if from == "" {
 		from = user
 	}
-	log.Printf("notificaciones email activas → %s", to)
-	return &SMTP{host: host, port: port, user: user, pass: pass, from: from, to: to}
+	override := os.Getenv("SMTP_TO")
+	dest := "destinatario por usuario"
+	if override != "" {
+		dest = override + " (override SMTP_TO)"
+	}
+	log.Printf("notificaciones email activas → %s", dest)
+	return &SMTP{host: host, port: port, user: user, pass: pass, from: from, override: override}
 }
 
-func (s *SMTP) Notify(subject, body string) error {
+func (s *SMTP) Send(to, subject, body string) error {
+	if s.override != "" {
+		to = s.override
+	}
+	if to == "" {
+		return nil // sin destinatario conocido
+	}
 	msg := strings.Join([]string{
 		"From: " + s.from,
-		"To: " + s.to,
+		"To: " + to,
 		"Subject: " + subject,
 		"MIME-Version: 1.0",
 		"Content-Type: text/plain; charset=UTF-8",
@@ -59,8 +74,7 @@ func (s *SMTP) Notify(subject, body string) error {
 	}, "\r\n")
 
 	auth := smtp.PlainAuth("", s.user, s.pass, s.host)
-	addr := s.host + ":" + s.port
-	if err := smtp.SendMail(addr, auth, s.from, []string{s.to}, []byte(msg)); err != nil {
+	if err := smtp.SendMail(s.host+":"+s.port, auth, s.from, []string{to}, []byte(msg)); err != nil {
 		return fmt.Errorf("enviar email: %w", err)
 	}
 	return nil

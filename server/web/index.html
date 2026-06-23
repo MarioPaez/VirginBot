@@ -33,10 +33,17 @@
   td { padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
   tr:hover td { background:#191c22; }
   tr.booked td { background:rgba(31,170,89,.08); }
-  .time { font-variant-numeric:tabular-nums; color:#fff; font-weight:600; white-space:nowrap; width:120px; }
+  .time { font-variant-numeric:tabular-nums; color:#fff; font-weight:600; white-space:nowrap; }
   .name { font-weight:600; }
   .club, .studio { color:var(--muted); white-space:nowrap; }
   .actions { text-align:right; white-space:nowrap; }
+  /* Tablas del calendario: ancho de columnas fijo e idéntico en todos los días
+     para que la columna "club" quede siempre alineada (no escalonada). */
+  table.grid { table-layout:fixed; }
+  table.grid td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.grid .time { width:108px; }
+  table.grid .club { width:170px; }
+  table.grid .actions { width:188px; }
   .btn { border:1px solid var(--line); background:var(--card); color:#e9ecf1; border-radius:8px;
          padding:5px 12px; cursor:pointer; font-size:13px; }
   .btn:hover { border-color:var(--muted); }
@@ -53,6 +60,9 @@
            pointer-events:none; max-width:80vw; }
   #toast.show { opacity:1; }
   #toast.err { border-color:var(--red); }
+  .user { display:inline-flex; align-items:center; gap:6px; color:#e9ecf1; font-size:13px;
+          background:var(--card); border:1px solid var(--line); border-radius:999px; padding:4px 12px; }
+  .user::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--green); }
   .logout { background:transparent; border:1px solid var(--line); color:var(--muted);
             border-radius:8px; padding:5px 12px; cursor:pointer; font-size:13px; }
   .logout:hover { border-color:var(--muted); }
@@ -74,6 +84,7 @@
   <div class="top">
     <h1>Virgin<span>Bot</span> · Calendario corsi</h1>
     <div class="meta" id="meta"></div>
+    <span class="user" id="user" title="Sesión iniciada"></span>
     <button class="logout" onclick="logout()">Salir</button>
   </div>
   <div class="tabs">
@@ -135,7 +146,8 @@ function toast(msg, isErr) {
 
 async function load() {
   const token = ++loadToken;
-  autos = await (await fetch(`/api/automations`)).json().catch(() => []);
+  try { autos = (await (await fetch(`/api/automations`)).json()) || []; }
+  catch (e) { autos = []; }
   await loadCalendar(token);
 }
 
@@ -186,17 +198,18 @@ function render() {
   renderClasses(rows, false);
 }
 
-// loadBookings escanea las reservas día a día (próximos días) y las va pintando.
-async function loadBookings() {
-  bookings = [];
-  $("#out").innerHTML = `<div class="loading">Cargando tus reservas…</div>`;
-  const { dates } = await (await fetch(`/api/dates?days=3`)).json();
-  await Promise.all(dates.map(async date => {
-    const classes = await fetchDay(`/api/bookingday?date=${date}`);
-    bookings.push(...classes);
-    if (state.view === "bookings") renderClasses(bookings, true);
-  }));
-  if (state.view === "bookings" && !bookings.length) renderClasses([], true);
+// loadBookings lee las reservas persistidas en la BD (consistentes con Virgin,
+// sin días pasados). Un escaneo en 2º plano del servidor las mantiene al día; si
+// la primera lectura llega vacía (escaneo aún en curso tras arrancar), reintenta.
+async function loadBookings(attempt = 0) {
+  if (attempt === 0) $("#out").innerHTML = `<div class="loading">Cargando tus reservas…</div>`;
+  bookings = (await (await fetch(`/api/bookings`)).json()) || [];
+  if (state.view !== "bookings") return;
+  if (!bookings.length && attempt < 3) {
+    setTimeout(() => { if (state.view === "bookings") loadBookings(attempt + 1); }, 2500);
+    return;
+  }
+  renderClasses(bookings, true);
 }
 
 const STATUS_BADGE = { waitlist: "lleno", unavailable: "no disp." };
@@ -229,21 +242,38 @@ function renderClasses(rows, isBookings) {
   for (const c of rows) (byDay[c.date] ??= []).push(c);
   $("#out").innerHTML = Object.keys(byDay).sort().map(date =>
     `<div class="day"><h2>${weekdays[weekdayOf(date)]} · ${date} <span style="color:var(--muted)">(${byDay[date].length})</span></h2>
-     <table>${byDay[date].map(classRow).join("")}</table></div>`).join("");
+     <table class="grid">${byDay[date].map(classRow).join("")}</table></div>`).join("");
 }
+
+// nextOccurrence calcula la próxima fecha de una regla (su día de la semana),
+// saltando a la semana siguiente si hoy es ese día pero la hora ya pasó.
+function nextOccurrence(r) {
+  const now = new Date();
+  const d = new Date(now); d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + ((r.weekday - d.getDay() + 7) % 7));
+  if (d.toDateString() === now.toDateString()) {
+    const [h, m] = r.start.split(":").map(Number);
+    if (now.getHours() * 60 + now.getMinutes() > h * 60 + m) d.setDate(d.getDate() + 7);
+  }
+  return d;
+}
+
+const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
 
 function renderAutomations() {
   if (!autos.length) {
     $("#out").innerHTML = `<div class="empty">Sin automatizaciones. Marca "auto" en una clase del calendario para reservarla cada semana.</div>`;
     return;
   }
-  $("#out").innerHTML = `<div class="day"><table>` + autos.map(r =>
-    `<tr><td class="time">${r.start}</td>
+  $("#out").innerHTML = `<div class="day"><table>` + autos.map(r => {
+    const next = capitalize(nextOccurrence(r).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" }));
+    return `<tr><td class="time">${r.start}</td>
       <td class="name">${r.name}</td>
-      <td class="club">${r.club} · ${weekdays[r.weekday]}</td>
-      <td class="actions"><button class="btn btn-cancel" onclick="removeAuto('${r.id}')">Quitar</button></td>
-    </tr>`).join("") + `</table></div>
-    <div class="empty" style="text-align:left;font-size:13px">Cada semana intenta reservar al abrir el plazo (48h antes) y reintenta desde 24h antes si está llena.</div>`;
+      <td class="club">${r.club}</td>
+      <td class="studio">próxima: ${next} · abre ${r.opensDaysBefore}d antes</td>
+      <td class="actions"><button class="btn btn-cancel" onclick="removeAuto('${r.id}')">Quitar</button></td>`;
+  }).join("") + `</table></div>
+    <div class="empty" style="text-align:left;font-size:13px">Cada semana intenta reservar en cuanto abre el plazo (calistenia 7 días antes, solarium 2) y reintenta si está llena hasta conseguir hueco.</div>`;
 }
 
 // ---- acciones ----
@@ -269,14 +299,14 @@ async function toggleAuto(c, on) {
       if (rule) await fetch(`/api/automations?id=${rule.id}`, {method:"DELETE"});
       toast("Automatización quitada");
     }
-    autos = await (await fetch(`/api/automations`)).json();
+    autos = (await (await fetch(`/api/automations`)).json()) || [];
     render();
   } catch (e) { toast("Error: " + e, true); }
 }
 
 async function removeAuto(id) {
   await fetch(`/api/automations?id=${id}`, {method:"DELETE"});
-  autos = await (await fetch(`/api/automations`)).json();
+  autos = (await (await fetch(`/api/automations`)).json()) || [];
   render();
 }
 
@@ -306,7 +336,7 @@ function showApp()   { $("#login").style.display = "none"; }
 async function init() {
   try {
     const me = await (await fetch("/api/me")).json();
-    if (me.loggedIn) { showApp(); load(); }
+    if (me.loggedIn) { $("#user").textContent = me.email || "sesión"; showApp(); load(); }
     else showLogin();
   } catch (e) { showLogin(); }
 }

@@ -1,0 +1,16 @@
+# Secretos y datos locales: NUNCA en la imagen
+.env
+*.env
+virginbot.db
+virginbot.db-*
+credentials.enc
+automations.json
+
+# Binarios y control de versiones
+/virginbot
+.git
+.gitignore
+
+# Misc
+*.md
+notes/

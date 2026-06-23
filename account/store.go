@@ -5,31 +5,27 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"io"
-	"os"
-	"sync"
+	"time"
 )
 
-// Store guarda las credenciales de Virgin Active del usuario, CIFRADAS en reposo
-// (AES-256-GCM). Hay que poder recuperarlas en claro para re-loguear de forma
-// desatendida (la sesión caduca a las 2h y reservar 48h antes es automático).
+// Store guarda las cuentas de Virgin Active de los usuarios en SQLite, con la
+// contraseña CIFRADA (AES-256-GCM). Hay que poder recuperarla en claro para
+// re-loguear de forma desatendida (la sesión de Virgin caduca a las ~2h).
+//
+// La identidad de un usuario es su email de Virgin (único). El cifrado es
+// stateless: cada lectura descifra desde la BD, así no mantenemos secretos en
+// memoria más de lo necesario.
 type Store struct {
-	path string
-	gcm  cipher.AEAD
-	mu   sync.Mutex
-	cur  *creds
+	db  *sql.DB
+	gcm cipher.AEAD
 }
 
-type creds struct {
-	Email string `json:"email"`
-	Pass  string `json:"pass"`
-}
-
-// NewStore abre (o crea) el almacén. `secret` deriva la clave de cifrado; debe
-// ser estable entre reinicios (variable de entorno APP_SECRET).
-func NewStore(path, secret string) (*Store, error) {
+// NewStore abre el almacén sobre la BD. `secret` deriva la clave de cifrado;
+// debe ser estable entre reinicios (variable de entorno APP_SECRET).
+func NewStore(db *sql.DB, secret string) (*Store, error) {
 	key := sha256.Sum256([]byte(secret))
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
@@ -39,66 +35,87 @@ func NewStore(path, secret string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, gcm: gcm}
-	s.load()
-	return s, nil
+	return &Store{db: db, gcm: gcm}, nil
 }
 
-func (s *Store) load() {
-	data, err := os.ReadFile(s.path)
+// Upsert crea o actualiza un usuario por email (cifrando la contraseña) y
+// devuelve su id.
+func (s *Store) Upsert(email, pass string) (int64, error) {
+	enc, err := s.encrypt(pass)
 	if err != nil {
-		return
+		return 0, err
 	}
-	ns := s.gcm.NonceSize()
-	if len(data) < ns {
-		return
-	}
-	pt, err := s.gcm.Open(nil, data[:ns], data[ns:], nil)
+	_, err = s.db.Exec(
+		`INSERT INTO users (email, pass, created) VALUES (?, ?, ?)
+		 ON CONFLICT(email) DO UPDATE SET pass = excluded.pass`,
+		email, enc, time.Now().Format(time.RFC3339))
 	if err != nil {
-		return // clave incorrecta o fichero corrupto: arrancamos sin credenciales
+		return 0, fmt.Errorf("guardar usuario: %w", err)
 	}
-	var c creds
-	if json.Unmarshal(pt, &c) == nil {
-		s.cur = &c
+	var id int64
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE email = ?`, email).Scan(&id); err != nil {
+		return 0, err
 	}
+	return id, nil
 }
 
-// Set cifra y persiste las credenciales.
-func (s *Store) Set(email, pass string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	pt, err := json.Marshal(creds{Email: email, Pass: pass})
-	if err != nil {
-		return err
-	}
-	nonce := make([]byte, s.gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return err
-	}
-	ct := s.gcm.Seal(nonce, nonce, pt, nil)
-	if err := os.WriteFile(s.path, ct, 0o600); err != nil {
-		return fmt.Errorf("guardar credenciales: %w", err)
-	}
-	s.cur = &creds{Email: email, Pass: pass}
-	return nil
-}
-
-// Get devuelve las credenciales guardadas.
-func (s *Store) Get() (email, pass string, ok bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cur == nil {
+// Get devuelve las credenciales (email + contraseña en claro) de un usuario.
+func (s *Store) Get(userID int64) (email, pass string, ok bool) {
+	var enc []byte
+	if err := s.db.QueryRow(`SELECT email, pass FROM users WHERE id = ?`, userID).Scan(&email, &enc); err != nil {
 		return "", "", false
 	}
-	return s.cur.Email, s.cur.Pass, true
+	pt, err := s.decrypt(enc)
+	if err != nil {
+		return "", "", false
+	}
+	return email, pt, true
 }
 
-// Email devuelve el email configurado (o "").
-func (s *Store) Email() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cur == nil {
+// Email devuelve el email de un usuario (o "").
+func (s *Store) Email(userID int64) string {
+	var email string
+	if err := s.db.QueryRow(`SELECT email FROM users WHERE id = ?`, userID).Scan(&email); err != nil {
 		return ""
 	}
-	return s.cur.Email
+	return email
+}
+
+// ListUserIDs devuelve los ids de todos los usuarios registrados.
+func (s *Store) ListUserIDs() []int64 {
+	rows, err := s.db.Query(`SELECT id FROM users ORDER BY id`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// ---- cifrado ----
+
+func (s *Store) encrypt(pass string) ([]byte, error) {
+	nonce := make([]byte, s.gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return s.gcm.Seal(nonce, nonce, []byte(pass), nil), nil
+}
+
+func (s *Store) decrypt(enc []byte) (string, error) {
+	ns := s.gcm.NonceSize()
+	if len(enc) < ns {
+		return "", fmt.Errorf("dato cifrado inválido")
+	}
+	pt, err := s.gcm.Open(nil, enc[:ns], enc[ns:], nil)
+	if err != nil {
+		return "", err
+	}
+	return string(pt), nil
 }
