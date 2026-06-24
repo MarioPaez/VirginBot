@@ -246,7 +246,17 @@ func (e *Engine) attempt(o occ, st *occState) {
 				log.Printf("automation: %s — ronda %d/%d: la clase aún no está en el calendario", tag, round+1, e.rounds)
 			case c.Booked:
 				st.booked = true
-				log.Printf("automation: %s — ya estaba reservada, nada que hacer", tag)
+				if st.attempts > 0 {
+					// Habíamos intentado reservar: la reserva SÍ cuajó (aunque la API
+					// devolviera error). Lo confirmamos como éxito.
+					log.Printf("automation: ✓ %s — RESERVADA (confirmada tras %d intento(s), pese a error de la API)", tag, st.attempts)
+					e.notify(o.rule.UserID,
+						fmt.Sprintf("VirginBot: ✓ reservada %s", o.rule.Name),
+						fmt.Sprintf("¡Reserva conseguida! Te he apuntado automáticamente:\n\n%s\n\nNos vemos en clase 💪\n",
+							classLines(o.rule.Name, o.rule.Club, o.start)))
+				} else {
+					log.Printf("automation: %s — ya estaba reservada, nada que hacer", tag)
+				}
 				return
 			case c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0:
 				st.attempts++

@@ -105,11 +105,11 @@ func main() {
 		if err != nil {
 			return err
 		}
-		if err := client.Book(clubID, classID, sessionID, date); err != nil {
-			return err
-		}
-		srv.InvalidateUser(userID) // refresca reservas (reconcilia la tabla bookings) y calendario
-		return nil
+		bookErr := client.Book(clubID, classID, sessionID, date)
+		// Reconcilia las reservas SIEMPRE: aunque la API devuelva error, la reserva
+		// puede haber cuajado; así la siguiente ronda del motor lo detecta (overlay).
+		srv.InvalidateUser(userID)
+		return bookErr
 	}, notifyUser)
 	go engine.Run(make(chan struct{}))
 
