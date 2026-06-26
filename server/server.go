@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/notification"
+	"github.com/MarioPaez/VirginBot/vapi"
 )
 
 //go:embed web
@@ -162,23 +164,36 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"days": out})
 }
 
-// freshClasses descarga (vapi) las clases de todos los clubes en el rango, las
-// cura (filtro keep), deduplica (una fila por club+clase+hora) y marca las
-// reservadas (overlay).
-func (s *Server) freshClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
-	client, err := s.auth.ClientFor(userID)
+// downloadClasses descarga (vapi) y cura (filtro keep) las clases de todos los
+// clubes en el rango, SIN deduplicar ni marcar reservas: cada llamante decide si
+// colapsa las "camas" del Solarium (web) o las conserva todas (motor).
+func (s *Server) downloadClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
+	var classes []calendar.Class
+	err := s.auth.Do(userID, func(client *vapi.Client) error {
+		classes = classes[:0]
+		for _, clubID := range s.clubs {
+			cc, err := client.Classes(clubID, start, end)
+			if err != nil {
+				return err
+			}
+			classes = append(classes, cc...)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	var classes []calendar.Class
-	for _, clubID := range s.clubs {
-		cc, err := client.Classes(clubID, start, end)
-		if err != nil {
-			return nil, err
-		}
-		classes = append(classes, cc...)
+	return s.curate(classes), nil
+}
+
+// freshClasses prepara el calendario para la web: deduplica (una fila por
+// club+clase+hora) y marca las reservadas (overlay).
+func (s *Server) freshClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
+	classes, err := s.downloadClasses(userID, start, end)
+	if err != nil {
+		return nil, err
 	}
-	return s.overlayBooked(userID, dedupe(s.curate(classes))), nil
+	return s.overlayBooked(userID, dedupe(classes)), nil
 }
 
 // dedupe colapsa las instancias de una misma clase (mismo club, nombre, fecha y
@@ -229,13 +244,19 @@ func (s *Server) futureOnly(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// FreshDayFor obtiene un día (curado+dedup+overlay) en vivo para el motor.
+// FreshDayFor obtiene un día en vivo para el motor, SIN deduplicar: el motor
+// necesita ver TODAS las "camas" del Solarium (cada una una clase reservable
+// distinta) para ir probándolas hasta que una acepte la reserva.
 func (s *Server) FreshDayFor(userID int64, date string) ([]calendar.Class, error) {
 	day, err := time.ParseInLocation("2006-01-02", date, s.loc)
 	if err != nil {
 		return nil, err
 	}
-	return s.freshClasses(userID, day, day)
+	classes, err := s.downloadClasses(userID, day, day)
+	if err != nil {
+		return nil, err
+	}
+	return s.overlayBooked(userID, classes), nil
 }
 
 // ---- reservas (tabla, reconciliada desde vapi) ----
@@ -271,14 +292,14 @@ func (s *Server) triggerBookings(userID int64) {
 
 // fetchBookings reconcilia la tabla bookings del usuario con vapi (una llamada).
 func (s *Server) fetchBookings(userID int64) {
-	client, err := s.auth.ClientFor(userID)
-	if err != nil {
-		log.Printf("reservas u%d: sin sesión: %v", userID, err)
-		return
-	}
 	now := time.Now().In(s.loc)
 	end := now.AddDate(0, 0, defaultDays)
-	booked, err := client.MyBookings(now, end)
+	var booked []calendar.Class
+	err := s.auth.Do(userID, func(client *vapi.Client) error {
+		var err error
+		booked, err = client.MyBookings(now, end)
+		return err
+	})
 	if err != nil {
 		log.Printf("reservas u%d fallido: %v", userID, err)
 		return
@@ -377,17 +398,51 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client, err := s.auth.ClientFor(userID)
+	// Re-resolvemos los ids contra el calendario FRESCO: los que manda el FE pueden
+	// estar desfasados (el navegador cachea el calendario y Virgin reprograma la
+	// sesión → nuevo sessionId), lo que provoca TOO_EARLY/TOO_LATE_TO_BOOK al
+	// reservar una ocurrencia que ya no es la de ese día.
+	classes, err := s.FreshDayFor(userID, req.Date)
 	if err != nil {
-		http.Error(w, "no autenticado: "+err.Error(), http.StatusBadGateway)
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if err := client.Book(req.ClubID, req.ClassID, req.SessionID, req.Date); err != nil {
-		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+	beds := bookableMatches(classes, req.Name, req.Club, req.Start)
+	if len(beds) == 0 {
+		writeJSON(w, map[string]any{"ok": false, "error": "ya no hay plaza reservable; recarga el calendario"})
+		return
+	}
+	// Probamos cada instancia hasta que el POST acepte (Solarium: varias "camas";
+	// clase normal: una sola).
+	var bookErr error
+	for _, c := range beds {
+		bookErr = s.auth.Do(userID, func(client *vapi.Client) error {
+			return client.Book(c.ClubID, c.ClassID, c.SessionID, req.Date)
+		})
+		if bookErr == nil {
+			break
+		}
+	}
+	if bookErr != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": bookErr.Error()})
 		return
 	}
 	s.InvalidateUser(userID)
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// bookableMatches devuelve las instancias reservables (status bookable, ids
+// válidos) que casan con name+club+start del día ya descargado. Re-resolver así
+// evita reservar un sessionId desfasado que mandó el FE desde su caché.
+func bookableMatches(classes []calendar.Class, name, club, start string) []calendar.Class {
+	var out []calendar.Class
+	for _, c := range classes {
+		if strings.EqualFold(c.Name, name) && strings.EqualFold(c.Club, club) && c.Start == start &&
+			c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0 {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
@@ -396,12 +451,10 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client, err := s.auth.ClientFor(userID)
+	err := s.auth.Do(userID, func(client *vapi.Client) error {
+		return client.Cancel(req.SessionID, req.BookingID, req.ClubID, req.ClassID, req.Date)
+	})
 	if err != nil {
-		http.Error(w, "no autenticado: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	if err := client.Cancel(req.SessionID, req.BookingID, req.ClubID, req.ClassID, req.Date); err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -494,11 +547,10 @@ func (s *Server) tryBookNow(userID int64, req bookRequest) bool {
 	if req.ClassID == 0 || req.SessionID == 0 || req.Booked {
 		return false
 	}
-	client, err := s.auth.ClientFor(userID)
+	err := s.auth.Do(userID, func(client *vapi.Client) error {
+		return client.Book(req.ClubID, req.ClassID, req.SessionID, req.Date)
+	})
 	if err != nil {
-		return false
-	}
-	if err := client.Book(req.ClubID, req.ClassID, req.SessionID, req.Date); err != nil {
 		return false
 	}
 	s.InvalidateUser(userID)

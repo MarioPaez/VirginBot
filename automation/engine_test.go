@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -116,5 +117,54 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	e.maybeFire(o, time.Date(2026, 6, 28, 18, 15, 1, 0, loc))
 	if failEmails != 1 {
 		t.Fatalf("debe avisar de fallo tras el último disparo; failEmails=%d", failEmails)
+	}
+}
+
+// La API de reserva devuelve error en TODAS las rondas (incluida la última) pero la
+// reserva sí cuajó: la reconciliación final debe detectarla, confirmar éxito y NO
+// avisar de fallo. Cubre el caso del error-pero-cuajó en la última ronda.
+func TestFinalReconcileConfirmsBooking(t *testing.T) {
+	loc := mustLoc(t)
+	o := sampleOcc(loc)
+
+	var fetches int
+	fetch := func(int64, string) ([]calendar.Class, error) {
+		fetches++
+		c := calendar.Class{
+			Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			ClubID: 209, ClassID: 387071, SessionID: 79403,
+		}
+		// Durante las rondas se ve reservable; en la reconciliación final (última
+		// consulta) ya aparece reservada (la reserva cuajó pese al error de la API).
+		if fetches >= 3 {
+			c.Booked = true
+			c.Status = "booked"
+		} else {
+			c.Status = "bookable"
+		}
+		return []calendar.Class{c}, nil
+	}
+	book := func(int64, int, int, int, string) error { return errors.New("HTTP 500") }
+	var okEmails, failEmails int
+	notify := func(_ int64, subject, _ string) {
+		switch {
+		case strings.HasPrefix(subject, "VirginBot: ✓"):
+			okEmails++
+		case strings.HasPrefix(subject, "VirginBot: ✗"):
+			failEmails++
+		}
+	}
+	e := NewEngine(nil, fetch, book, notify)
+	e.loc = loc
+	e.rounds = 2
+	e.gap, e.gap1, e.lead = 0, 0, 0
+
+	// Último disparo (T-1d 18:15): book falla siempre, pero la reserva cuajó.
+	e.maybeFire(o, time.Date(2026, 6, 28, 18, 15, 1, 0, loc))
+	if failEmails != 0 {
+		t.Fatalf("no debe avisar de fallo si la reserva cuajó; failEmails=%d", failEmails)
+	}
+	if okEmails != 1 {
+		t.Fatalf("debe confirmar la reserva en la reconciliación final; okEmails=%d", okEmails)
 	}
 }

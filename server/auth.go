@@ -71,3 +71,32 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 }
 
 func (a *Auth) Email(userID int64) string { return a.store.Email(userID) }
+
+// Invalidate descarta el cliente cacheado del usuario, forzando un re-login en la
+// próxima llamada. Se usa cuando vapi responde 401 (token invalidado fuera de
+// banda, p. ej. al iniciar sesión en el móvil) antes de que expire authTTL.
+func (a *Auth) Invalidate(userID int64) {
+	a.mu.Lock()
+	delete(a.clients, userID)
+	a.mu.Unlock()
+}
+
+// Do ejecuta fn con el cliente autenticado del usuario y, si vapi devuelve 401,
+// descarta el cliente, re-loguea y reintenta UNA vez. Centraliza la recuperación
+// de tokens caducados que el cacheo por TTL no detecta.
+func (a *Auth) Do(userID int64, fn func(*vapi.Client) error) error {
+	c, err := a.ClientFor(userID)
+	if err != nil {
+		return err
+	}
+	err = fn(c)
+	if !errors.Is(err, vapi.ErrUnauthorized) {
+		return err
+	}
+	a.Invalidate(userID)
+	c, err = a.ClientFor(userID)
+	if err != nil {
+		return err
+	}
+	return fn(c)
+}

@@ -22,10 +22,10 @@ import (
 // intentos espaciados. Tunables por env (VIRGINBOT_ATTEMPTS/GAP_SEC/LEAD_SEC) sin
 // recompilar, porque el retardo real es empírico.
 const (
-	defaultAttempts = 5                // intentos por disparo
+	defaultAttempts = 9                // intentos por disparo (~1 min de ventana con los gaps de abajo)
 	defaultLeadSec  = 0                // margen tras la hora antes del 1er intento (0 = a la hora exacta)
-	defaultGap1Sec  = 5                // espera entre el 1er y el 2º intento
-	defaultGapSec   = 7                // espera entre los intentos siguientes
+	defaultGap1Sec  = 4                // espera entre el 1er y el 2º intento (corta: por si abre con unos segundos de retraso)
+	defaultGapSec   = 8                // espera entre los intentos siguientes
 	maxIdle         = 5 * time.Minute  // re-evalúa la agenda (sin red) para captar reglas nuevas
 	triggerGrace    = 15 * time.Minute // un disparo solo cuenta si estamos a <=15min de su hora (no recupera disparos viejos)
 	horizonDays     = 8                // cubre la ventana más larga (calistenia, 7 días)
@@ -239,43 +239,46 @@ func (e *Engine) attempt(o occ, st *occState) {
 			st.lastError = err.Error()
 			log.Printf("automation: %s — ronda %d/%d: ERROR al consultar el calendario: %v", tag, round+1, e.rounds, err)
 		} else {
-			c := findMatch(classes, o.rule)
+			matches := findMatches(classes, o.rule)
 			switch {
-			case c == nil:
+			case len(matches) == 0:
 				st.lastError = "no está en el calendario aún"
 				log.Printf("automation: %s — ronda %d/%d: la clase aún no está en el calendario", tag, round+1, e.rounds)
-			case c.Booked:
+			case bookedMatch(matches) != nil:
 				st.booked = true
 				if st.attempts > 0 {
 					// Habíamos intentado reservar: la reserva SÍ cuajó (aunque la API
 					// devolviera error). Lo confirmamos como éxito.
 					log.Printf("automation: ✓ %s — RESERVADA (confirmada tras %d intento(s), pese a error de la API)", tag, st.attempts)
-					e.notify(o.rule.UserID,
-						fmt.Sprintf("VirginBot: ✓ reservada %s", o.rule.Name),
-						fmt.Sprintf("¡Reserva conseguida! Te he apuntado automáticamente:\n\n%s\n\nNos vemos en clase 💪\n",
-							classLines(o.rule.Name, o.rule.Club, o.start)))
+					e.notifyBooked(o, st)
 				} else {
 					log.Printf("automation: %s — ya estaba reservada, nada que hacer", tag)
 				}
 				return
-			case c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0:
-				st.attempts++
-				log.Printf("automation: %s — ronda %d/%d: RESERVABLE (classId=%d sessionId=%d), reservando…", tag, round+1, e.rounds, c.ClassID, c.SessionID)
-				if err := e.book(o.rule.UserID, c.ClubID, c.ClassID, c.SessionID, o.date); err != nil {
-					st.lastError = err.Error()
-					log.Printf("automation: %s — ronda %d/%d: FALLÓ la reserva: %v", tag, round+1, e.rounds, err)
-				} else {
+			default:
+				// El Solarium expone varias "camas" reservables a la misma hora.
+				// Probamos las que el calendario marca reservables, una a una, hasta
+				// que el POST acepte: ese estado a veces miente (TOO_LATE_TO_BOOK).
+				beds := bookableBeds(matches)
+				if len(beds) == 0 {
+					st.lastError = "no reservable (status=" + matches[0].Status + ")"
+					log.Printf("automation: %s — ronda %d/%d: no reservable (status=%q, p. ej. llena o plazo no abierto)", tag, round+1, e.rounds, matches[0].Status)
+					break
+				}
+				log.Printf("automation: %s — ronda %d/%d: %d cama(s) RESERVABLE(s), probando…", tag, round+1, e.rounds, len(beds))
+				for bi, c := range beds {
+					st.attempts++
+					log.Printf("automation: %s — ronda %d/%d cama %d/%d (classId=%d sessionId=%d), reservando…", tag, round+1, e.rounds, bi+1, len(beds), c.ClassID, c.SessionID)
+					if err := e.book(o.rule.UserID, c.ClubID, c.ClassID, c.SessionID, o.date); err != nil {
+						st.lastError = err.Error()
+						log.Printf("automation: %s — ronda %d/%d cama %d/%d: FALLÓ la reserva: %v", tag, round+1, e.rounds, bi+1, len(beds), err)
+						continue
+					}
 					st.booked = true
-					log.Printf("automation: ✓ %s — RESERVADA (intento %d)", tag, st.attempts)
-					e.notify(o.rule.UserID,
-						fmt.Sprintf("VirginBot: ✓ reservada %s", o.rule.Name),
-						fmt.Sprintf("¡Reserva conseguida! Te he apuntado automáticamente:\n\n%s\nIntentos: %d\n\nNos vemos en clase 💪\n",
-							classLines(o.rule.Name, o.rule.Club, o.start), st.attempts))
+					log.Printf("automation: ✓ %s — RESERVADA (cama %d/%d, intento %d)", tag, bi+1, len(beds), st.attempts)
+					e.notifyBooked(o, st)
 					return
 				}
-			default:
-				st.lastError = "no reservable (status=" + c.Status + ")"
-				log.Printf("automation: %s — ronda %d/%d: no reservable (status=%q, p. ej. llena o plazo no abierto)", tag, round+1, e.rounds, c.Status)
 			}
 		}
 		if round < e.rounds-1 {
@@ -286,6 +289,19 @@ func (e *Engine) attempt(o occ, st *occState) {
 			if wait > 0 {
 				log.Printf("automation: %s — esperando %s para la ronda %d/%d", tag, wait, round+2, e.rounds)
 				time.Sleep(wait)
+			}
+		}
+	}
+	// Reconciliación final: si en la ÚLTIMA ronda el book devolvió error pero la
+	// reserva cuajó, no hay ronda siguiente que lo detecte vía overlay. Volvemos a
+	// consultar una vez para confirmar antes de dar el disparo por fallido (evita el
+	// email de fallo falso y un reintento que reservaría dos veces).
+	if !st.booked && st.attempts > 0 {
+		if classes, err := e.fetchDay(o.rule.UserID, o.date); err == nil {
+			if bookedMatch(findMatches(classes, o.rule)) != nil {
+				st.booked = true
+				log.Printf("automation: ✓ %s — RESERVADA (confirmada en reconciliación final, pese a error de la API)", tag)
+				e.notifyBooked(o, st)
 			}
 		}
 	}
@@ -317,14 +333,53 @@ func (e *Engine) untilNext(now time.Time, occs []occ) time.Duration {
 	return sleep
 }
 
-func findMatch(classes []calendar.Class, r Rule) *calendar.Class {
+// findMatches devuelve TODAS las instancias que casan con la regla. El Solarium
+// expone varias "camas" a la misma hora (cada una una clase reservable distinta),
+// así que una regla puede casar con más de una.
+func findMatches(classes []calendar.Class, r Rule) []*calendar.Class {
+	var out []*calendar.Class
 	for i := range classes {
 		c := &classes[i]
 		if strings.EqualFold(c.Name, r.Name) && strings.EqualFold(c.Club, r.Club) && c.Start == r.Start {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// bookedMatch devuelve la primera instancia ya reservada por el socio, si la hay
+// (basta una: todas las camas comparten nombre+club+fecha+hora en el overlay).
+func bookedMatch(matches []*calendar.Class) *calendar.Class {
+	for _, c := range matches {
+		if c.Booked {
 			return c
 		}
 	}
 	return nil
+}
+
+// bookableBeds filtra las instancias que el calendario marca reservables y con
+// ids válidos. El motor las prueba en orden hasta que el POST de reserva acepte.
+func bookableBeds(matches []*calendar.Class) []*calendar.Class {
+	var out []*calendar.Class
+	for _, c := range matches {
+		if c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0 {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// notifyBooked avisa al socio de una reserva conseguida (incluye los intentos si
+// los hubo: reserva directa, confirmación tras error de la API o reconciliación).
+func (e *Engine) notifyBooked(o occ, st *occState) {
+	body := fmt.Sprintf("¡Reserva conseguida! Te he apuntado automáticamente:\n\n%s\n",
+		classLines(o.rule.Name, o.rule.Club, o.start))
+	if st.attempts > 0 {
+		body += fmt.Sprintf("Intentos: %d\n", st.attempts)
+	}
+	body += "\nNos vemos en clase 💪\n"
+	e.notify(o.rule.UserID, fmt.Sprintf("VirginBot: ✓ reservada %s", o.rule.Name), body)
 }
 
 // ---- estado ----

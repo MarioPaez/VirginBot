@@ -13,6 +13,7 @@ import (
 	"github.com/MarioPaez/VirginBot/db"
 	"github.com/MarioPaez/VirginBot/notification"
 	"github.com/MarioPaez/VirginBot/server"
+	"github.com/MarioPaez/VirginBot/vapi"
 )
 
 const defaultDBFile = "virginbot.db"
@@ -101,11 +102,10 @@ func main() {
 	// Motor de automatización: sondea con timing preciso (fetch fresco por día y
 	// usuario), reserva con el cliente autenticado de cada usuario y avisa por email.
 	engine := automation.NewEngine(store, srv.FreshDayFor, func(userID int64, clubID, classID, sessionID int, date string) error {
-		client, err := auth.ClientFor(userID)
-		if err != nil {
-			return err
-		}
-		bookErr := client.Book(clubID, classID, sessionID, date)
+		// auth.Do re-loguea y reintenta si el token está caducado (401).
+		bookErr := auth.Do(userID, func(client *vapi.Client) error {
+			return client.Book(clubID, classID, sessionID, date)
+		})
 		// Reconcilia las reservas SIEMPRE: aunque la API devuelva error, la reserva
 		// puede haber cuajado; así la siguiente ronda del motor lo detecta (overlay).
 		srv.InvalidateUser(userID)
