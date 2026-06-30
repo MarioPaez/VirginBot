@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS users (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     email   TEXT NOT NULL UNIQUE,
     pass    BLOB NOT NULL,
-    created TEXT NOT NULL
+    created TEXT NOT NULL,
+    lang    TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS automations (
     user_id           INTEGER NOT NULL,
@@ -110,6 +111,10 @@ func migrate(d *sql.DB) error {
 		}
 	}
 	if err := ensureColumn(d, "bookings", "instructor", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// i18n: idioma preferido del usuario (vacío = aún sin detectar).
+	if err := ensureColumn(d, "users", "lang", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 

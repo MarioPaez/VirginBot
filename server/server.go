@@ -17,6 +17,7 @@ import (
 	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/i18n"
 	"github.com/MarioPaez/VirginBot/notification"
 	"github.com/MarioPaez/VirginBot/vapi"
 )
@@ -104,6 +105,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/book", s.requireSession(s.handleBook))
 	mux.HandleFunc("/api/unbook", s.requireSession(s.handleUnbook))
 	mux.HandleFunc("/api/automations", s.requireSession(s.handleAutomations))
+	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("/", noCache(http.FileServer(http.FS(static))))
 	return mux
@@ -485,9 +487,11 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		out := make([]automationView, 0, len(rules))
 		for _, rule := range rules {
 			v := automationView{Rule: rule}
-			if date, at, ok := s.nextAttempt(userID, rule); ok {
-				v.NextClass = date
-				v.NextAttempt = at.Format(time.RFC3339)
+			if rule.Enabled { // las pausadas no se ejecutan: no calculamos próximo intento
+				if date, at, ok := s.nextAttempt(userID, rule); ok {
+					v.NextClass = date
+					v.NextAttempt = at.Format(time.RFC3339)
+				}
 			}
 			out = append(out, v)
 		}
@@ -508,21 +512,31 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		booked := s.tryBookNow(userID, req)
+		lang := s.langOf(userID)
 		if booked {
 			when, _ := time.ParseInLocation("2006-01-02 15:04", req.Date+" "+req.Start, s.loc)
+			block := i18n.T(lang, "block.class", req.Name, req.Club, i18n.FormatDateTime(lang, when))
 			s.emailUser(userID,
-				fmt.Sprintf("VirginBot: ✓ reservada %s", rule.Name),
-				fmt.Sprintf("¡Reserva conseguida al automatizar! Te he apuntado a:\n\nClase: %s\nClub: %s\nDía: %s\n\nLa automatización queda activa para reservar también las próximas semanas.\n",
-					req.Name, req.Club, automation.FormatDateTimeIT(when)),
-			)
+				i18n.T(lang, "email.booked.subject", rule.Name),
+				i18n.T(lang, "email.bookednow.body", block))
 		} else {
 			s.emailUser(userID,
-				fmt.Sprintf("VirginBot: automatización añadida — %s", rule.Name),
-				fmt.Sprintf("Nueva automatización activada. Reservaré esta clase automáticamente cada semana:\n\n%s\n\nIntentaré reservar en cuanto abra el plazo (a la hora de la clase) y te avisaré del resultado.\n",
-					rule.Summary(s.loc)),
-			)
+				i18n.T(lang, "email.added.subject", rule.Name),
+				i18n.T(lang, "email.added.body", rule.Summary(lang, s.loc)))
 		}
 		writeJSON(w, map[string]any{"rule": rule, "booked": booked})
+	case http.MethodPatch:
+		id := r.URL.Query().Get("id")
+		if _, found := s.store.Get(userID, id); !found {
+			http.Error(w, "automatización no encontrada", http.StatusNotFound)
+			return
+		}
+		enabled := r.URL.Query().Get("enabled") == "1"
+		if err := s.store.SetEnabled(userID, id, enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 	case http.MethodDelete:
 		id := r.URL.Query().Get("id")
 		rule, found := s.store.Get(userID, id)
@@ -531,11 +545,10 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if found {
+			lang := s.langOf(userID)
 			s.emailUser(userID,
-				fmt.Sprintf("VirginBot: automatización quitada — %s", rule.Name),
-				fmt.Sprintf("Has desactivado esta automatización. Ya no se reservará:\n\n%s\n",
-					rule.Summary(s.loc)),
-			)
+				i18n.T(lang, "email.removed.subject", rule.Name),
+				i18n.T(lang, "email.removed.body", rule.Summary(lang, s.loc)))
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	default:
@@ -597,6 +610,11 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 }
 
 // ---- helpers ----
+
+// langOf devuelve el idioma del usuario (it/es/en), con fallback a Default.
+func (s *Server) langOf(userID int64) i18n.Lang {
+	return i18n.Coerce(s.accounts.Lang(userID))
+}
 
 func (s *Server) emailUser(userID int64, subject, body string) {
 	to := s.auth.Email(userID)

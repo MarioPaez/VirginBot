@@ -81,6 +81,21 @@ func (s *Store) Email(userID int64) string {
 	return email
 }
 
+// Lang devuelve el idioma preferido del usuario (o "" si aún no se ha fijado).
+func (s *Store) Lang(userID int64) string {
+	var lang string
+	if err := s.db.QueryRow(`SELECT lang FROM users WHERE id = ?`, userID).Scan(&lang); err != nil {
+		return ""
+	}
+	return lang
+}
+
+// SetLang fija el idioma preferido del usuario (código it/es/en).
+func (s *Store) SetLang(userID int64, lang string) error {
+	_, err := s.db.Exec(`UPDATE users SET lang = ? WHERE id = ?`, lang, userID)
+	return err
+}
+
 // ListUserIDs devuelve los ids de todos los usuarios registrados.
 func (s *Store) ListUserIDs() []int64 {
 	rows, err := s.db.Query(`SELECT id FROM users ORDER BY id`)

@@ -1,22 +1,11 @@
 package automation
 
 import (
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/MarioPaez/VirginBot/i18n"
 )
-
-var monthsIT = [...]string{
-	"", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
-	"luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre",
-}
-
-// FormatDateTimeIT formatea una fecha/hora en italiano: "Domenica 28 giugno 2026, 17:00".
-func FormatDateTimeIT(t time.Time) string {
-	return fmt.Sprintf("%s %d %s %d, %02d:%02d",
-		weekdaysIT[int(t.Weekday())], t.Day(), monthsIT[int(t.Month())], t.Year(),
-		t.Hour(), t.Minute())
-}
 
 // nextOccurrence devuelve la próxima fecha/hora (en loc) que casa con el día de
 // la semana y la hora de la regla, a partir de `from` (incluido si aún no pasó).
@@ -46,27 +35,27 @@ func windowDaysOf(r Rule) int {
 	return WindowDays(r.Name)
 }
 
-// Summary devuelve un bloque legible con la info relevante de una regla:
-// clase, club, próxima ocurrencia exacta y cuándo abre el plazo de reserva.
-func (r Rule) Summary(loc *time.Location) string {
+// Summary devuelve un bloque legible (en el idioma dado) con la info relevante
+// de una regla: clase, club, próxima ocurrencia exacta y cuándo abre el plazo.
+func (r Rule) Summary(lang i18n.Lang, loc *time.Location) string {
 	lines := []string{
-		"Clase: " + r.Name,
-		"Club: " + r.Club,
+		i18n.T(lang, "summary.class", r.Name),
+		i18n.T(lang, "summary.club", r.Club),
 	}
 	if occ, ok := nextOccurrence(r, time.Now().In(loc), loc); ok {
 		w := windowDaysOf(r)
 		open := occ.Add(-time.Duration(w) * 24 * time.Hour)
 		lines = append(lines,
-			"Próxima clase: "+FormatDateTimeIT(occ),
-			fmt.Sprintf("Plazo de reserva: abre %d días antes (%s)", w, FormatDateTimeIT(open)),
+			i18n.T(lang, "summary.next", i18n.FormatDateTime(lang, occ)),
+			i18n.T(lang, "summary.window", w, i18n.FormatDateTime(lang, open)),
 		)
 	} else {
-		lines = append(lines, fmt.Sprintf("Cuándo: cada %s a las %s", weekdaysIT[r.Weekday], r.Start))
+		lines = append(lines, i18n.T(lang, "summary.when", i18n.Weekday(lang, r.Weekday), r.Start))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // classLines formatea las líneas clase/club/día de una ocurrencia concreta.
-func classLines(name, club string, when time.Time) string {
-	return fmt.Sprintf("Clase: %s\nClub: %s\nDía: %s", name, club, FormatDateTimeIT(when))
+func classLines(lang i18n.Lang, name, club string, when time.Time) string {
+	return i18n.T(lang, "block.class", name, club, i18n.FormatDateTime(lang, when))
 }

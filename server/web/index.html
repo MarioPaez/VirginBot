@@ -20,7 +20,8 @@
   .tab { background:transparent; border:none; border-bottom:2px solid transparent; color:var(--muted);
          padding:8px 14px; cursor:pointer; font-size:14px; }
   .tab.active { color:#fff; border-bottom-color:var(--red); }
-  .controls { display:flex; gap:16px; flex-wrap:wrap; padding:16px 24px; align-items:center; }
+  .controls { display:flex; gap:16px; flex-wrap:wrap; padding:16px 24px; align-items:center;
+              max-width:760px; margin-inline:auto; }
   .chipgroup { display:flex; align-items:center; gap:8px; }
   .grouplabel { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; }
@@ -29,33 +30,12 @@
   .chip:hover { border-color:var(--muted); }
   .chip.active { background:var(--red); border-color:var(--red); color:#fff; }
   main { padding:0 24px 64px; }
-  .day { margin-top:24px; }
-  .day h2 { font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
-            border-bottom:1px solid var(--line); padding-bottom:6px; margin:0 0 8px; }
-  table { width:100%; border-collapse:collapse; }
-  td { padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
-  tr:hover td { background:#191c22; }
-  tr.booked td { background:rgba(31,170,89,.08); }
-  .time { font-variant-numeric:tabular-nums; color:#fff; font-weight:600; white-space:nowrap; }
-  .name { font-weight:600; }
-  .club, .studio, .instr { color:var(--muted); white-space:nowrap; }
-  .actions { text-align:right; white-space:nowrap; }
-  /* Tablas del calendario: ancho de columnas fijo e idéntico en todos los días
-     para que la columna "club" quede siempre alineada (no escalonada). */
-  table.grid { table-layout:fixed; }
-  table.grid td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  table.grid .time { width:132px; }
-  table.grid .club { width:150px; }
-  table.grid .instr { width:150px; }
-  table.grid .actions { width:188px; }
   .btn { border:1px solid var(--line); background:var(--card); color:#e9ecf1; border-radius:8px;
          padding:5px 12px; cursor:pointer; font-size:13px; }
   .btn:hover { border-color:var(--muted); }
   .btn[disabled] { opacity:.4; cursor:not-allowed; }
   .btn-book { border-color:var(--red); color:#fff; }
   .btn-cancel { border-color:var(--red); color:var(--red); }
-  .badge { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--card); border:1px solid var(--line); color:var(--muted); }
-  .badge.ok { background:rgba(31,170,89,.15); border-color:var(--green); color:#7fe0a8; }
   .auto { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; cursor:pointer; user-select:none; }
   .auto input { accent-color:var(--red); cursor:pointer; }
   .empty, .loading { color:var(--muted); padding:40px 0; text-align:center; }
@@ -67,6 +47,9 @@
   .user { display:inline-flex; align-items:center; gap:6px; color:#e9ecf1; font-size:13px;
           background:var(--card); border:1px solid var(--line); border-radius:999px; padding:4px 12px; }
   .user::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--green); }
+  .langsel { background:var(--card); border:1px solid var(--line); color:#e9ecf1; border-radius:8px;
+             padding:5px 8px; font-size:13px; cursor:pointer; }
+  .langsel:hover { border-color:var(--muted); }
   .logout { background:transparent; border:1px solid var(--line); color:var(--muted);
             border-radius:8px; padding:5px 12px; cursor:pointer; font-size:13px; }
   .logout:hover { border-color:var(--muted); }
@@ -81,58 +64,247 @@
   .login-card input:focus { border-color:var(--red); }
   .login-card .btn { padding:10px; font-size:15px; }
   .login-err { color:var(--red); font-size:13px; min-height:16px; }
+  /* ---- Automatizaciones (agenda semanal) ---- */
+  .autos-wrap { max-width:760px; margin:4px auto 0; padding:0 24px; }
+  .autos-filters { display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin-bottom:6px; }
+  .daygroup { margin-top:24px; }
+  .daygroup-head { display:flex; align-items:center; gap:12px; margin:0 0 12px; }
+  .daygroup-head .dow { font-size:12px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:#e9ecf1; }
+  .daygroup-head .rule { flex:1; height:1px; background:var(--line); }
+  .daygroup-head .count { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+  .auto-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(264px, 340px));
+               gap:14px; justify-content:start; }
+  .auto-card { display:flex; gap:13px; background:var(--card); border:1px solid var(--line);
+               border-radius:14px; padding:15px 16px; transition:border-color .15s, opacity .15s; }
+  .auto-card:hover { border-color:#3a3f4b; }
+  .auto-card.paused { opacity:.55; }
+  .auto-card .accent { width:4px; border-radius:4px; flex:none; align-self:stretch; }
+  .auto-card.paused .accent { background:var(--line) !important; }
+  .auto-card .body { flex:1; min-width:0; }
+  .auto-head { display:flex; align-items:center; gap:9px; }
+  .auto-icon { font-size:17px; line-height:1; flex:none; }
+  .auto-title { font-size:15px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .auto-time { margin-left:auto; padding-left:8px; font-variant-numeric:tabular-nums; font-weight:700; font-size:15px; color:#fff; }
+  .auto-club { color:var(--muted); font-size:12.5px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .auto-meta { margin-top:11px; padding-top:11px; border-top:1px solid var(--line);
+               display:grid; gap:4px; font-size:12.5px; color:var(--muted); }
+  .auto-meta b { color:#e9ecf1; font-weight:600; }
+  .auto-foot { display:flex; align-items:center; gap:4px; margin-top:12px; }
+  .auto-foot .spacer { flex:1; }
+  .pill { font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; white-space:nowrap; }
+  .pill.active { background:rgba(31,170,89,.15); border:1px solid var(--green); color:#7fe0a8; }
+  .pill.paused { background:rgba(245,166,35,.12); border:1px solid #6b531a; color:#f0c069; }
+  .pill.wait { background:rgba(245,166,35,.12); border:1px solid #6b531a; color:#f0c069; }
+  .pill.off { background:#22262f; border:1px solid var(--line); color:var(--muted); }
+  .linkbtn { background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:12.5px;
+             padding:5px 8px; border-radius:7px; transition:.15s; }
+  .linkbtn:hover { color:#e9ecf1; background:#22262f; }
+  .linkbtn.danger:hover { color:var(--red); }
+  .hint { max-width:760px; margin:24px auto 0; color:var(--muted); font-size:12.5px; line-height:1.55;
+          padding:14px 24px 0; border-top:1px solid var(--line); }
+  /* ---- Listas (calendario / reservas) ---- */
+  .list-wrap { max-width:760px; margin:0 auto; padding:0 24px; }
+  .clist { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .crow { display:grid; grid-template-columns:22px 52px 1fr auto; align-items:center; gap:13px;
+          padding:10px 16px 10px 13px; border-top:1px solid var(--line); border-left:3px solid transparent;
+          transition:background .12s; }
+  .crow:first-child { border-top:none; }
+  .crow:hover { background:#1e222b; }
+  .crow.booked { background:rgba(31,170,89,.06); }
+  .crow .cicon { font-size:16px; line-height:1; text-align:center; }
+  .crow .ctime { font-variant-numeric:tabular-nums; line-height:1.25; }
+  .crow .ctime .s { font-weight:700; color:#fff; font-size:13.5px; }
+  .crow .ctime .e { color:var(--muted); font-size:11.5px; }
+  .crow .cmain { min-width:0; }
+  .crow .cname { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .crow .csub { color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .crow .cact { display:flex; align-items:center; gap:12px; justify-self:end; }
+  @media (max-width:560px) {
+    .crow { grid-template-columns:20px 48px 1fr; row-gap:8px; }
+    .crow .cact { grid-column:2 / -1; justify-self:start; }
+    .auto-grid { grid-template-columns:1fr; }
+    .autos-filters { gap:12px; }
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="top">
     <img src="/logo.svg" class="logo" alt="VirginBot">
-    <h1>Virgin<span>Bot</span> · Calendario corsi</h1>
+    <h1>Virgin<span>Bot</span> <span class="tagline" data-i18n="header.tagline">· Calendario corsi</span></h1>
     <div class="meta" id="meta"></div>
-    <span class="user" id="user" title="Sesión iniciada"></span>
-    <button class="logout" onclick="logout()">Salir</button>
+    <select id="langSel" class="langsel" onchange="setLang(this.value)" aria-label="Lingua / Idioma / Language">
+      <option value="it">IT</option><option value="es">ES</option><option value="en">EN</option>
+    </select>
+    <span class="user" id="user" data-i18n-title="header.session"></span>
+    <button class="logout" onclick="logout()" data-i18n="action.logout">Salir</button>
   </div>
   <div class="tabs">
-    <button class="tab active" data-view="calendar">Calendario</button>
-    <button class="tab" data-view="bookings">Mis reservas</button>
-    <button class="tab" data-view="automations">Automatizaciones</button>
+    <button class="tab active" data-view="calendar" data-i18n="tab.calendar">Calendario</button>
+    <button class="tab" data-view="bookings" data-i18n="tab.bookings">Mis reservas</button>
+    <button class="tab" data-view="automations" data-i18n="tab.automations">Automatizaciones</button>
   </div>
 </header>
 
 <div class="controls" id="controls">
   <div class="chipgroup">
-    <span class="grouplabel">Clase</span>
+    <span class="grouplabel" data-i18n="filter.class">Clase</span>
     <div class="chips" id="classChips" data-multi="1"></div>
   </div>
   <div class="chipgroup">
-    <span class="grouplabel">Club</span>
-    <div class="chips" id="clubChips" data-key="club">
-      <button class="chip active" data-val="">Todos</button>
-    </div>
+    <span class="grouplabel" data-i18n="filter.club">Club</span>
+    <div class="chips" id="clubChips" data-key="club"></div>
   </div>
 </div>
 
-<main id="out"><div class="loading">Preparando el calendario…</div></main>
+<main id="out"><div class="loading" data-i18n="loading.calendar">Preparando el calendario…</div></main>
 <div id="toast"></div>
 
 <div id="login" class="login-overlay" style="display:none">
   <form class="login-card" onsubmit="doLogin(event)">
     <img src="/logo.svg" class="logo-lg" alt="VirginBot">
     <h2>Virgin<span>Bot</span></h2>
-    <p class="login-sub">Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.</p>
-    <input id="li-email" type="email" placeholder="email" autocomplete="username" required>
-    <input id="li-pass" type="password" placeholder="contraseña" autocomplete="current-password" required>
-    <button type="submit" class="btn btn-book" id="li-btn">Entrar</button>
+    <p class="login-sub" data-i18n="login.sub">Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.</p>
+    <input id="li-email" type="email" data-i18n-ph="login.email" placeholder="email" autocomplete="username" required>
+    <input id="li-pass" type="password" data-i18n-ph="login.pass" placeholder="contraseña" autocomplete="current-password" required>
+    <button type="submit" class="btn btn-book" id="li-btn" data-i18n="login.submit">Entrar</button>
     <div id="li-err" class="login-err"></div>
   </form>
 </div>
 
 <script>
 const DAYS = 10;
-const weekdays = ["Domenica","Lunedì","Martedì","Mercoledì","Giovedì","Venerdì","Sabato"];
 const $ = s => document.querySelector(s);
 let all = [], autos = [], bookings = [], loadToken = 0;
-const state = { cats: new Set(), club: "", view: "calendar" };
+const state = { cats: new Set(), club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
+
+// ---- i18n ----
+const LANGS = ["it", "es", "en"];
+const LOCALE = { it: "it-IT", es: "es-ES", en: "en-GB" };
+const I18N = {
+  it: {
+    "header.tagline": "· Calendario corsi", "header.session": "Sessione attiva", "action.logout": "Esci",
+    "tab.calendar": "Calendario", "tab.bookings": "Le mie prenotazioni", "tab.automations": "Automazioni",
+    "filter.class": "Lezione", "filter.club": "Club", "filter.status": "Stato",
+    "all.m": "Tutti", "all.f": "Tutte", "status.active": "Attive", "status.paused": "In pausa",
+    "loading.calendar": "Preparazione del calendario…", "loading.calendar2": "Caricamento calendario…",
+    "loading.bookings": "Caricamento prenotazioni…", "error.calendar": "Impossibile caricare il calendario. Riprova.",
+    "meta.count": "%d lezioni · %d giorni",
+    "row.booked": "Prenotata", "action.cancel": "Annulla", "action.book": "Prenota",
+    "status.full": "Pieno", "status.unavailable": "Non disp.",
+    "empty.bookings": "Non hai prenotazioni nei prossimi giorni.", "empty.calendar": "Nessuna lezione con questi filtri.",
+    "empty.autos": "Non hai ancora automatizzato nessuna lezione.<br>Spunta <b>auto</b> su una lezione del calendario e la prenoterò ogni settimana.",
+    "empty.autos.filtered": "Nessuna automazione con questi filtri.",
+    "auto.willnotrun": "Non verrà eseguita finché non la riattivi.",
+    "auto.next": "Prossimo tentativo <b>%s</b>", "auto.willbook": "Prenoterà la lezione del <b>%s</b>",
+    "auto.pill.active": "Attiva", "auto.pill.paused": "In pausa",
+    "auto.activate": "Attiva", "auto.pause": "Pausa", "auto.remove": "Rimuovi",
+    "auto.hint": "Ogni settimana provo a prenotare all'ora della lezione, da quando si aprono le prenotazioni (calisthenics 7 giorni prima, solarium 2) fino a 24 h prima. Metti in pausa senza perdere la configurazione e riattiva quando vuoi.",
+    "toast.activated": "Attivata ✓", "toast.paused": "In pausa", "toast.booked": "Prenotata ✓", "toast.cancelled": "Annullata ✓",
+    "toast.error": "Errore", "toast.bookedbang": "Prenotata! ✓", "toast.autoadded": "Automazione aggiunta ✓", "toast.autoremoved": "Automazione rimossa",
+    "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
+    "login.email": "email", "login.pass": "password", "login.submit": "Entra", "login.loading": "Accesso…",
+    "rel.today": "oggi", "rel.tomorrow": "domani",
+  },
+  es: {
+    "header.tagline": "· Calendario de clases", "header.session": "Sesión iniciada", "action.logout": "Salir",
+    "tab.calendar": "Calendario", "tab.bookings": "Mis reservas", "tab.automations": "Automatizaciones",
+    "filter.class": "Clase", "filter.club": "Club", "filter.status": "Estado",
+    "all.m": "Todos", "all.f": "Todas", "status.active": "Activas", "status.paused": "Pausadas",
+    "loading.calendar": "Preparando el calendario…", "loading.calendar2": "Cargando calendario…",
+    "loading.bookings": "Cargando tus reservas…", "error.calendar": "No se pudo cargar el calendario. Reintenta.",
+    "meta.count": "%d clases · %d días",
+    "row.booked": "Reservada", "action.cancel": "Cancelar", "action.book": "Reservar",
+    "status.full": "Lleno", "status.unavailable": "No disp.",
+    "empty.bookings": "No tienes reservas en los próximos días.", "empty.calendar": "Ninguna clase con estos filtros.",
+    "empty.autos": "Aún no automatizas ninguna clase.<br>Marca <b>auto</b> en una clase del calendario y la reservaré cada semana.",
+    "empty.autos.filtered": "Ninguna automatización con estos filtros.",
+    "auto.willnotrun": "No se ejecutará hasta que la actives.",
+    "auto.next": "Próximo intento <b>%s</b>", "auto.willbook": "Reserva la clase del <b>%s</b>",
+    "auto.pill.active": "Activa", "auto.pill.paused": "Pausada",
+    "auto.activate": "Activar", "auto.pause": "Pausar", "auto.remove": "Quitar",
+    "auto.hint": "Cada semana intento reservar a la hora de la clase, desde que abre el plazo (calistenia 7 días antes, solarium 2) hasta 24 h antes. Pausa una sin perder su configuración y actívala cuando quieras.",
+    "toast.activated": "Activada ✓", "toast.paused": "Pausada", "toast.booked": "Reservada ✓", "toast.cancelled": "Cancelada ✓",
+    "toast.error": "Error", "toast.bookedbang": "¡Reservada! ✓", "toast.autoadded": "Automatización añadida ✓", "toast.autoremoved": "Automatización quitada",
+    "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
+    "login.email": "email", "login.pass": "contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
+    "rel.today": "hoy", "rel.tomorrow": "mañana",
+  },
+  en: {
+    "header.tagline": "· Class calendar", "header.session": "Signed in", "action.logout": "Log out",
+    "tab.calendar": "Calendar", "tab.bookings": "My bookings", "tab.automations": "Automations",
+    "filter.class": "Class", "filter.club": "Club", "filter.status": "Status",
+    "all.m": "All", "all.f": "All", "status.active": "Active", "status.paused": "Paused",
+    "loading.calendar": "Preparing the calendar…", "loading.calendar2": "Loading the calendar…",
+    "loading.bookings": "Loading your bookings…", "error.calendar": "Couldn't load the calendar. Try again.",
+    "meta.count": "%d classes · %d days",
+    "row.booked": "Booked", "action.cancel": "Cancel", "action.book": "Book",
+    "status.full": "Full", "status.unavailable": "N/A",
+    "empty.bookings": "You have no bookings in the coming days.", "empty.calendar": "No classes match these filters.",
+    "empty.autos": "You haven't automated any class yet.<br>Tick <b>auto</b> on a class in the calendar and I'll book it every week.",
+    "empty.autos.filtered": "No automations match these filters.",
+    "auto.willnotrun": "It won't run until you turn it on.",
+    "auto.next": "Next attempt <b>%s</b>", "auto.willbook": "Will book the class on <b>%s</b>",
+    "auto.pill.active": "Active", "auto.pill.paused": "Paused",
+    "auto.activate": "Activate", "auto.pause": "Pause", "auto.remove": "Remove",
+    "auto.hint": "Every week I try to book at class time, from when booking opens (calisthenics 7 days before, solarium 2) until 24h before. Pause one without losing its setup and turn it back on whenever you want.",
+    "toast.activated": "Activated ✓", "toast.paused": "Paused", "toast.booked": "Booked ✓", "toast.cancelled": "Cancelled ✓",
+    "toast.error": "Error", "toast.bookedbang": "Booked! ✓", "toast.autoadded": "Automation added ✓", "toast.autoremoved": "Automation removed",
+    "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
+    "login.email": "email", "login.pass": "password", "login.submit": "Sign in", "login.loading": "Signing in…",
+    "rel.today": "today", "rel.tomorrow": "tomorrow",
+  },
+};
+
+let lang = (() => {
+  const saved = localStorage.getItem("lang");
+  if (LANGS.includes(saved)) return saved;
+  for (const l of (navigator.languages || [navigator.language || "en"])) {
+    const c = String(l).toLowerCase().split("-")[0];
+    if (LANGS.includes(c)) return c;
+  }
+  return "en";
+})();
+
+// t traduce una clave (con fallback a inglés) y sustituye %s/%d por los args.
+function t(key, ...args) {
+  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+  let i = 0;
+  return s.replace(/%[sd]/g, () => args[i++]);
+}
+
+const loc = () => LOCALE[lang] || "en-GB";
+
+// applyI18n vuelca el catálogo en los elementos estáticos marcados con data-i18n.
+function applyI18n() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => el.innerHTML = t(el.dataset.i18n));
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  document.querySelectorAll("[data-i18n-title]").forEach(el => el.title = t(el.dataset.i18nTitle));
+  const sel = $("#langSel"); if (sel) sel.value = lang;
+  updateMeta();
+}
+
+function updateMeta() {
+  if (all.length) $("#meta").textContent = t("meta.count", all.length, new Set(all.map(c => c.date)).size);
+}
+
+// setLang cambia el idioma: persiste (local + servidor para los emails) y repinta.
+async function setLang(v) {
+  if (!LANGS.includes(v)) return;
+  lang = v;
+  localStorage.setItem("lang", v);
+  fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (también para emails)
+  applyI18n();
+  if ($("#login").style.display !== "none") return; // solo login visible: nada que repintar
+  if (state.view === "calendar") { populateClubChips(all); populateClassChips(all); }
+  render();
+}
+
+// weekdayName devuelve el nombre del día (0=Domingo) en el idioma activo.
+function weekdayName(wd) {
+  return capitalize(new Date(2024, 0, 7 + wd).toLocaleDateString(loc(), { weekday: "long" }));
+}
 
 // Categoría amplia de una clase, para los filtros (varias clases → una categoría).
 const CATEGORIES = ["Calisthenics", "Pilates", "Solarium", "Full Body", "TRX", "Cycle"];
@@ -169,14 +341,14 @@ async function load() {
 // navegador lo guarda en memoria (`all`); al cambiar de pestaña no se re-pide.
 async function loadCalendar(token) {
   all = [];
-  $("#out").innerHTML = `<div class="loading">Cargando calendario…</div>`;
+  $("#out").innerHTML = `<div class="loading">${t("loading.calendar2")}</div>`;
   const res = await fetch(`/api/calendar?days=${DAYS}`);
   if (token !== loadToken) return;
   if (res.status === 401) { showLogin(); return; }
-  if (!res.ok) { $("#out").innerHTML = `<div class="empty">No se pudo cargar el calendario. Reintenta.</div>`; return; }
+  if (!res.ok) { $("#out").innerHTML = `<div class="empty">${t("error.calendar")}</div>`; return; }
   const { days } = await res.json();
   for (const d of (days || [])) all.push(...(d.classes || []));
-  $("#meta").textContent = `${all.length} clases · ${(days || []).length} días`;
+  $("#meta").textContent = t("meta.count", all.length, (days || []).length);
   populateClubChips(all);
   populateClassChips(all);
   if (state.view === "calendar") render();
@@ -185,7 +357,7 @@ async function loadCalendar(token) {
 function populateClubChips(list) {
   const clubs = [...new Set(list.map(c => c.club))].sort();
   $("#clubChips").innerHTML =
-    `<button class="chip${state.club===""?" active":""}" data-val="">Todos</button>` +
+    `<button class="chip${state.club===""?" active":""}" data-val="">${t("all.m")}</button>` +
     clubs.map(c => `<button class="chip${state.club===c?" active":""}" data-val="${c}">${c.replace(/^Milano\s+/i,"")}</button>`).join("");
 }
 
@@ -194,7 +366,7 @@ function populateClassChips(list) {
   const present = new Set(list.map(c => classCategory(c.name)));
   const cats = CATEGORIES.filter(c => present.has(c)).concat([...present].filter(c => !CATEGORIES.includes(c)));
   $("#classChips").innerHTML =
-    `<button class="chip${state.cats.size===0?" active":""}" data-val="">Todas</button>` +
+    `<button class="chip${state.cats.size===0?" active":""}" data-val="">${t("all.f")}</button>` +
     cats.map(c => `<button class="chip${state.cats.has(c)?" active":""}" data-val="${c}">${c}</button>`).join("");
 }
 
@@ -212,7 +384,7 @@ function render() {
 // sin días pasados). Un escaneo en 2º plano del servidor las mantiene al día; si
 // la primera lectura llega vacía (escaneo aún en curso tras arrancar), reintenta.
 async function loadBookings(attempt = 0) {
-  if (attempt === 0) $("#out").innerHTML = `<div class="loading">Cargando tus reservas…</div>`;
+  if (attempt === 0) $("#out").innerHTML = `<div class="loading">${t("loading.bookings")}</div>`;
   bookings = (await (await fetch(`/api/bookings`)).json()) || [];
   if (state.view !== "bookings") return;
   if (!bookings.length && attempt < 3) {
@@ -222,60 +394,46 @@ async function loadBookings(attempt = 0) {
   renderClasses(bookings, true);
 }
 
-const STATUS_BADGE = { waitlist: "lleno", unavailable: "no disp." };
+const STATUS_PILL = { waitlist: ["wait", "status.full"], unavailable: ["off", "status.unavailable"] };
 
 function classRow(c) {
   const rule = ruleFor(c);
-  let action;
+  const st = catStyle(c.name);
+  let right;
   if (c.booked)
-    action = `<button class="btn btn-cancel" onclick='act("unbook",${JSON.stringify(c)})'>Cancelar</button>`;
+    right = `<span class="pill active">${t("row.booked")}</span>
+             <button class="btn btn-cancel" onclick='act("unbook",${JSON.stringify(c)})'>${t("action.cancel")}</button>`;
   else if (c.status === "bookable")
-    action = `<button class="btn btn-book" onclick='act("book",${JSON.stringify(c)})'>Reservar</button>`;
-  else
-    action = `<span class="badge">${STATUS_BADGE[c.status] || "no disp."}</span>`;
+    right = `<button class="btn btn-book" onclick='act("book",${JSON.stringify(c)})'>${t("action.book")}</button>`;
+  else {
+    const [cls, key] = STATUS_PILL[c.status] || ["off", "status.unavailable"];
+    right = `<span class="pill ${cls}">${t(key)}</span>`;
+  }
   const auto = `<label class="auto"><input type="checkbox" ${rule?"checked":""}
         onchange='toggleAuto(${JSON.stringify(c)}, this.checked)'>auto</label>`;
-  return `<tr class="${c.booked?"booked":""}">
-    <td class="time">${c.start}–${c.end}</td>
-    <td class="name">${c.name}${c.booked?' <span class="badge ok">reservada</span>':''}</td>
-    <td class="club">${c.club}</td>
-    <td class="instr">${c.instructor || "—"}</td>
-    <td class="actions">${auto} &nbsp; ${action}</td>
-  </tr>`;
+  return `<div class="crow${c.booked?" booked":""}" style="border-left-color:${st.color}">
+    <div class="cicon">${st.icon}</div>
+    <div class="ctime"><div class="s">${c.start}</div><div class="e">${c.end}</div></div>
+    <div class="cmain">
+      <div class="cname">${c.name}</div>
+      <div class="csub">${c.club}${c.instructor?` · ${c.instructor}`:""}</div>
+    </div>
+    <div class="cact">${auto}${right}</div>
+  </div>`;
 }
 
 function renderClasses(rows, isBookings) {
-  const tools = isBookings
-    ? `<div style="margin-top:16px"><button class="btn" onclick="refreshBookings()">🔄 Actualizar reservas</button></div>`
-    : "";
   if (!rows.length) {
-    $("#out").innerHTML = tools + `<div class="empty">${isBookings?"No tienes reservas en los próximos días.":"Sin clases con esos filtros."}</div>`;
+    $("#out").innerHTML = `<div class="empty">${isBookings?t("empty.bookings"):t("empty.calendar")}</div>`;
     return;
   }
   const byDay = {};
   for (const c of rows) (byDay[c.date] ??= []).push(c);
-  $("#out").innerHTML = tools + Object.keys(byDay).sort().map(date =>
-    `<div class="day"><h2>${weekdays[weekdayOf(date)]} · ${date} <span style="color:var(--muted)">(${byDay[date].length})</span></h2>
-     <table class="grid">${byDay[date].map(classRow).join("")}</table></div>`).join("");
-}
-
-// refreshBookings fuerza un re-escaneo de las reservas en el servidor (consistente
-// con Virgin) y recarga también las automatizaciones, porque una reserva nueva
-// puede dejar sin sentido la automatización de esa misma lección.
-async function refreshBookings() {
-  $("#out").innerHTML = `<div class="loading">Actualizando reservas… (puede tardar unos segundos)</div>`;
-  try {
-    await fetch("/api/bookings/refresh", { method: "POST" });
-  } catch (e) { toast("Error: " + e, true); return; }
-  // El escaneo (todas las clases) reconcilia en 2º plano; sondeamos un rato.
-  for (let i = 0; i < 12 && state.view === "bookings"; i++) {
-    await new Promise(r => setTimeout(r, 4000));
-    if (state.view !== "bookings") return;
-    bookings = (await (await fetch("/api/bookings")).json()) || [];
-    renderClasses(bookings, true);
-  }
-  autos = (await (await fetch("/api/automations")).json()) || []; // una reserva puede dejar sin sentido su automatización
-  toast("Reservas actualizadas ✓");
+  $("#out").innerHTML = `<div class="list-wrap">` + Object.keys(byDay).sort().map(date =>
+    `<div class="daygroup">
+       <div class="daygroup-head"><span class="dow">${fmtItDate(date)}</span><span class="rule"></span><span class="count">${byDay[date].length}</span></div>
+       <div class="clist">${byDay[date].map(classRow).join("")}</div>
+     </div>`).join("") + `</div>`;
 }
 
 // loadAutomations recarga las reglas (con su próximo intento ya recalculado,
@@ -287,26 +445,115 @@ async function loadAutomations() {
 
 const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
 
-const fmtItDateTime = iso => capitalize(new Date(iso).toLocaleString("it-IT", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }));
-const fmtItDate = ymd => capitalize(new Date(ymd + "T00:00").toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" }));
+const fmtItDateTime = iso => capitalize(new Date(iso).toLocaleString(loc(), { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }));
+const fmtItDate = ymd => capitalize(new Date(ymd + "T00:00").toLocaleDateString(loc(), { weekday: "long", day: "numeric", month: "long" }));
+
+// Color + icono por categoría, para el acento visual de cada tarjeta.
+const CAT_STYLE = {
+  Calisthenics: { color: "#e2231a", icon: "🏋️" },
+  Pilates:      { color: "#b07cff", icon: "🧘" },
+  Solarium:     { color: "#f5a623", icon: "☀️" },
+  "Full Body":  { color: "#1faa59", icon: "💪" },
+  TRX:          { color: "#34c3ff", icon: "🪢" },
+  Cycle:        { color: "#ff6b9d", icon: "🚴" },
+};
+const catStyle = name => CAT_STYLE[classCategory(name)] || { color: "#8b93a1", icon: "🏃" };
+
+// relWhen formatea un instante ISO en relativo y corto: "hoy 18:15", "mañana
+// 18:15", "Martedì 18:15" (esta semana) o "1 lug 18:15" (más lejos).
+function relWhen(iso) {
+  const d = new Date(iso), now = new Date();
+  const day0 = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const days = Math.round((day0(d) - day0(now)) / 86400000);
+  const hm = d.toLocaleTimeString(loc(), { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return `${t("rel.today")} ${hm}`;
+  if (days === 1) return `${t("rel.tomorrow")} ${hm}`;
+  if (days > 1 && days < 7) return `${capitalize(d.toLocaleDateString(loc(), { weekday: "long" }))} ${hm}`;
+  return `${d.toLocaleDateString(loc(), { day: "numeric", month: "short" })} ${hm}`;
+}
+
+const ordWeekday = w => (w === 0 ? 7 : w); // lunes→domingo (domingo al final)
 
 function renderAutomations() {
   if (!autos.length) {
-    $("#out").innerHTML = `<div class="empty">Sin automatizaciones. Marca "auto" en una clase del calendario para reservarla cada semana.</div>`;
+    $("#out").innerHTML = `<div class="empty">${t("empty.autos")}</div>`;
     return;
   }
-  $("#out").innerHTML = `<div class="day"><table>` + autos.map(r => {
-    const info = r.nextAttempt
-      ? `próximo intento: ${fmtItDateTime(r.nextAttempt)}`
-      : `sin próximas peticiones`;
-    const cls = r.nextClass ? `<br><small style="color:var(--muted)">clase: ${fmtItDate(r.nextClass)}</small>` : "";
-    return `<tr><td class="time">${r.start}</td>
-      <td class="name">${r.name}</td>
-      <td class="club">${r.club}</td>
-      <td class="studio">${info}${cls}</td>
-      <td class="actions"><button class="btn btn-cancel" onclick="removeAuto('${r.id}')">Quitar</button></td>`;
-  }).join("") + `</table></div>
-    <div class="empty" style="text-align:left;font-size:13px">Cada semana intenta reservar a la hora de la clase desde que abre el plazo (calistenia 7 días antes, solarium 2) hasta 24h antes.</div>`;
+  const cats = [...new Set(autos.map(r => classCategory(r.name)))];
+  const statusChips = [["all", "all.f"], ["active", "status.active"], ["paused", "status.paused"]]
+    .map(([v, k]) => `<button class="chip${state.autoStatus === v ? " active" : ""}" onclick="setAutoStatus('${v}')">${t(k)}</button>`).join("");
+  const catChips = cats.length > 1
+    ? `<div class="chipgroup"><span class="grouplabel">${t("filter.class")}</span><div class="chips">
+         <button class="chip${state.autoCats.size === 0 ? " active" : ""}" onclick="toggleAutoCat('')">${t("all.f")}</button>
+         ${cats.map(c => `<button class="chip${state.autoCats.has(c) ? " active" : ""}" onclick="toggleAutoCat('${c}')">${c}</button>`).join("")}
+       </div></div>`
+    : "";
+  const filters = `<div class="autos-filters">
+      <div class="chipgroup"><span class="grouplabel">${t("filter.status")}</span><div class="chips">${statusChips}</div></div>
+      ${catChips}</div>`;
+
+  const rows = autos.filter(r =>
+    (state.autoStatus === "all" || (state.autoStatus === "active") === !!r.enabled) &&
+    (state.autoCats.size === 0 || state.autoCats.has(classCategory(r.name))));
+
+  if (!rows.length) {
+    $("#out").innerHTML = `<div class="autos-wrap">${filters}<div class="empty">${t("empty.autos.filtered")}</div></div>`;
+    return;
+  }
+
+  const byDay = {};
+  for (const r of rows) (byDay[r.weekday] ??= []).push(r);
+  const groups = Object.keys(byDay).map(Number).sort((a, b) => ordWeekday(a) - ordWeekday(b)).map(wd => {
+    const list = byDay[wd].sort((a, b) => a.start.localeCompare(b.start));
+    return `<div class="daygroup">
+        <div class="daygroup-head"><span class="dow">${weekdayName(wd)}</span><span class="rule"></span><span class="count">${list.length}</span></div>
+        <div class="auto-grid">${list.map(autoCard).join("")}</div></div>`;
+  }).join("");
+
+  $("#out").innerHTML = `<div class="autos-wrap">${filters}${groups}</div>
+    <p class="hint">${t("auto.hint")}</p>`;
+}
+
+function autoCard(r) {
+  const st = catStyle(r.name);
+  const paused = !r.enabled;
+  const pill = paused ? `<span class="pill paused">${t("auto.pill.paused")}</span>` : `<span class="pill active">${t("auto.pill.active")}</span>`;
+  const meta = paused
+    ? `<div>${t("auto.willnotrun")}</div>`
+    : (r.nextAttempt ? `<div>${t("auto.next", relWhen(r.nextAttempt))}</div>` : "")
+      + (r.nextClass ? `<div>${t("auto.willbook", fmtItDate(r.nextClass))}</div>` : "");
+  return `<div class="auto-card${paused ? " paused" : ""}">
+    <div class="accent" style="background:${st.color}"></div>
+    <div class="body">
+      <div class="auto-head">
+        <span class="auto-icon">${st.icon}</span>
+        <span class="auto-title">${r.name}</span>
+        <span class="auto-time">${r.start}</span>
+      </div>
+      <div class="auto-club">${r.club}</div>
+      <div class="auto-meta">${meta}</div>
+      <div class="auto-foot">
+        ${pill}<span class="spacer"></span>
+        <button class="linkbtn" onclick="setAutoEnabled('${r.id}', ${paused})">${paused ? t("auto.activate") : t("auto.pause")}</button>
+        <button class="linkbtn danger" onclick="removeAuto('${r.id}')">${t("auto.remove")}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function setAutoStatus(v) { state.autoStatus = v; renderAutomations(); }
+function toggleAutoCat(v) {
+  if (!v) state.autoCats.clear();
+  else state.autoCats.has(v) ? state.autoCats.delete(v) : state.autoCats.add(v);
+  renderAutomations();
+}
+async function setAutoEnabled(id, enabled) {
+  try {
+    await fetch(`/api/automations?id=${id}&enabled=${enabled ? 1 : 0}`, { method: "PATCH" });
+    autos = (await (await fetch(`/api/automations`)).json()) || [];
+    toast(enabled ? t("toast.activated") : t("toast.paused"));
+    renderAutomations();
+  } catch (e) { toast(t("toast.error") + ": " + e, true); }
 }
 
 // ---- acciones ----
@@ -316,28 +563,28 @@ async function act(kind, c) {
       method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c)
     })).json();
     if (res.ok) {
-      toast(kind === "book" ? "Reservada ✓" : "Cancelada ✓");
+      toast(kind === "book" ? t("toast.booked") : t("toast.cancelled"));
       if (state.view === "bookings") loadBookings(); else load();
-    } else toast(res.error || "Error", true);
-  } catch (e) { toast("Error: " + e, true); }
+    } else toast(res.error || t("toast.error"), true);
+  } catch (e) { toast(t("toast.error") + ": " + e, true); }
 }
 
 async function toggleAuto(c, on) {
   try {
     if (on) {
       const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)})).json();
-      toast(res.booked ? "¡Reservada! ✓" : "Automatización añadida ✓");
+      toast(res.booked ? t("toast.bookedbang") : t("toast.autoadded"));
       autos = (await (await fetch(`/api/automations`)).json()) || [];
       if (res.booked) { load(); return; } // recarga el calendario para reflejar la reserva
       render();
     } else {
       const rule = ruleFor(c);
       if (rule) await fetch(`/api/automations?id=${rule.id}`, {method:"DELETE"});
-      toast("Automatización quitada");
+      toast(t("toast.autoremoved"));
       autos = (await (await fetch(`/api/automations`)).json()) || [];
       render();
     }
-  } catch (e) { toast("Error: " + e, true); }
+  } catch (e) { toast(t("toast.error") + ": " + e, true); }
 }
 
 async function removeAuto(id) {
@@ -381,10 +628,18 @@ function showLogin() { $("#login").style.display = "flex"; }
 function showApp()   { $("#login").style.display = "none"; }
 
 async function init() {
+  applyI18n(); // pinta el login/cabecera en el idioma detectado mientras consultamos /api/me
   try {
     const me = await (await fetch("/api/me")).json();
-    if (me.loggedIn) { $("#user").textContent = me.email || "sesión"; showApp(); load(); }
-    else showLogin();
+    if (me.loggedIn) {
+      // El servidor manda: si tiene idioma guardado, lo usamos (coherente con los
+      // emails); si no, persistimos el detectado en el navegador.
+      if (LANGS.includes(me.lang)) { lang = me.lang; localStorage.setItem("lang", lang); }
+      else fetch(`/api/lang?lang=${lang}`, { method: "PATCH" }).catch(() => {});
+      applyI18n();
+      $("#user").textContent = me.email || "";
+      showApp(); load();
+    } else showLogin();
   } catch (e) { showLogin(); }
 }
 
@@ -392,7 +647,7 @@ async function doLogin(e) {
   e.preventDefault();
   const btn = $("#li-btn");
   btn.disabled = true;
-  $("#li-err").textContent = "Entrando…";
+  $("#li-err").textContent = t("login.loading");
   try {
     const res = await fetch("/api/login", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -400,8 +655,8 @@ async function doLogin(e) {
     });
     const d = await res.json();
     if (d.ok) { $("#li-err").textContent = ""; showApp(); load(); }
-    else $("#li-err").textContent = d.error || "Error";
-  } catch (err) { $("#li-err").textContent = "Error: " + err; }
+    else $("#li-err").textContent = d.error || t("toast.error");
+  } catch (err) { $("#li-err").textContent = t("toast.error") + ": " + err; }
   btn.disabled = false;
 }
 

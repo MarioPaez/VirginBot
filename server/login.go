@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/MarioPaez/VirginBot/i18n"
 )
 
 const (
@@ -130,6 +132,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r),
 	})
+	// Detecta el idioma del navegador la primera vez (no pisa una elección previa).
+	if s.accounts.Lang(userID) == "" {
+		s.accounts.SetLang(userID, string(i18n.Normalize(r.Header.Get("Accept-Language"))))
+	}
 	s.InvalidateUser(userID) // recargar el calendario con la sesión autenticada
 	writeJSON(w, map[string]any{"ok": true, "email": req.Email})
 }
@@ -184,15 +190,29 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleMe informa del estado de sesión y del email del usuario logueado.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.userOf(r)
-	email := ""
+	email, lang := "", ""
 	if ok {
 		email = s.auth.Email(userID)
+		lang = s.accounts.Lang(userID)
 	}
 	writeJSON(w, map[string]any{
 		"loggedIn":   ok,
 		"configured": ok,
 		"email":      email,
+		"lang":       lang,
 	})
+}
+
+// handleSetLang fija el idioma preferido del usuario (it/es/en). Lo usa el
+// selector del frontend; afecta a la UI y a los emails.
+func (s *Server) handleSetLang(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFrom(r)
+	lang := string(i18n.Coerce(r.URL.Query().Get("lang")))
+	if err := s.accounts.SetLang(userID, lang); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "lang": lang})
 }
 
 // userOf devuelve el usuario de la cookie de sesión.

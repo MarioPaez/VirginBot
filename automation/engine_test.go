@@ -2,11 +2,13 @@ package automation
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/db"
 )
 
 func mustLoc(t *testing.T) *time.Location {
@@ -59,7 +61,7 @@ func TestFiresAtClassHourNotBefore(t *testing.T) {
 		}}, nil
 	}
 	book := func(int64, int, int, int, string) error { books++; return nil }
-	e := NewEngine(nil, fetch, book, nil)
+	e := NewEngine(nil, fetch, book, nil, nil)
 	e.loc = loc
 	e.gap = 0
 	e.gap1 = 0
@@ -102,7 +104,7 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 			failEmails++
 		}
 	}
-	e := NewEngine(nil, fetch, book, notify)
+	e := NewEngine(nil, fetch, book, notify, nil)
 	e.loc = loc
 	e.gap = 0
 	e.gap1 = 0
@@ -118,6 +120,58 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	if failEmails != 1 {
 		t.Fatalf("debe avisar de fallo tras el último disparo; failEmails=%d", failEmails)
 	}
+}
+
+// Pausar una regla (enabled=0) debe sacarla de la planificación del motor sin
+// borrarla; reactivarla la vuelve a programar. Usa una BD SQLite temporal real.
+func TestPausedRuleNotScheduled(t *testing.T) {
+	loc := mustLoc(t)
+	dbh, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("abrir BD: %v", err)
+	}
+	defer dbh.Close()
+	store := NewStore(dbh)
+
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
+	wd := int(now.AddDate(0, 0, 2).Weekday()) // clase 2 días después (dentro del horizonte)
+	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", wd, "23:30")
+	if err != nil {
+		t.Fatalf("añadir regla: %v", err)
+	}
+
+	e := NewEngine(store, nil, nil, nil, nil)
+	e.loc = loc
+
+	if got := countOcc(e.occurrences(now), rule.ID); got != 1 {
+		t.Fatalf("una regla activa debe programarse; ocurrencias=%d", got)
+	}
+	if err := store.SetEnabled(7, rule.ID, false); err != nil {
+		t.Fatalf("pausar: %v", err)
+	}
+	if got := countOcc(e.occurrences(now), rule.ID); got != 0 {
+		t.Fatalf("una regla pausada NO debe programarse; ocurrencias=%d", got)
+	}
+	// Sigue existiendo (no se ha borrado), solo deshabilitada.
+	if r, ok := store.Get(7, rule.ID); !ok || r.Enabled {
+		t.Fatalf("la regla pausada debe seguir existiendo y con enabled=false; ok=%v enabled=%v", ok, r.Enabled)
+	}
+	if err := store.SetEnabled(7, rule.ID, true); err != nil {
+		t.Fatalf("reactivar: %v", err)
+	}
+	if got := countOcc(e.occurrences(now), rule.ID); got != 1 {
+		t.Fatalf("al reactivar debe volver a programarse; ocurrencias=%d", got)
+	}
+}
+
+func countOcc(occs []occ, id string) int {
+	n := 0
+	for _, o := range occs {
+		if o.rule.ID == id {
+			n++
+		}
+	}
+	return n
 }
 
 // La API de reserva devuelve error en TODAS las rondas (incluida la última) pero la
@@ -154,7 +208,7 @@ func TestFinalReconcileConfirmsBooking(t *testing.T) {
 			failEmails++
 		}
 	}
-	e := NewEngine(nil, fetch, book, notify)
+	e := NewEngine(nil, fetch, book, notify, nil)
 	e.loc = loc
 	e.rounds = 2
 	e.gap, e.gap1, e.lead = 0, 0, 0

@@ -144,6 +144,14 @@ func (s *Store) Remove(userID int64, id string) error {
 	return err
 }
 
+// SetEnabled activa o pausa una regla sin perder su configuración. Una regla
+// pausada (enabled=0) sigue listada pero el motor la salta (no dispara).
+func (s *Store) SetEnabled(userID int64, id string, enabled bool) error {
+	_, err := s.db.Exec(`UPDATE automations SET enabled = ? WHERE user_id = ? AND id = ?`,
+		boolToInt(enabled), userID, id)
+	return err
+}
+
 // RemoveMatching elimina la regla de la clase indicada (al desapuntarse).
 func (s *Store) RemoveMatching(userID int64, name, club string, weekday int, start string) (bool, error) {
 	res, err := s.db.Exec(`DELETE FROM automations WHERE user_id = ? AND id = ?`,

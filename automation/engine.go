@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/i18n"
 )
 
 // Política de reserva: PRECISA, no por sondeo continuo. Las plazas de una clase
@@ -37,6 +38,7 @@ type Engine struct {
 	fetchDay func(userID int64, date string) ([]calendar.Class, error) // fetch fresco de un día (autenticado, curado)
 	book     func(userID int64, clubID, classID, sessionID int, date string) error
 	notify   func(userID int64, subject, body string)
+	lang     func(userID int64) string // idioma del usuario para los emails (it/es/en); nil = Default
 	loc      *time.Location
 	rounds   int           // intentos por disparo
 	lead     time.Duration // margen tras la hora antes del 1er intento
@@ -61,6 +63,7 @@ func NewEngine(
 	fetchDay func(int64, string) ([]calendar.Class, error),
 	book func(int64, int, int, int, string) error,
 	notify func(int64, string, string),
+	lang func(int64) string,
 ) *Engine {
 	loc, err := time.LoadLocation("Europe/Rome")
 	if err != nil {
@@ -70,7 +73,7 @@ func NewEngine(
 		notify = func(int64, string, string) {}
 	}
 	return &Engine{
-		store: store, fetchDay: fetchDay, book: book, notify: notify, loc: loc,
+		store: store, fetchDay: fetchDay, book: book, notify: notify, lang: lang, loc: loc,
 		rounds: envInt("VIRGINBOT_ATTEMPTS", defaultAttempts),
 		lead:   time.Duration(envInt("VIRGINBOT_LEAD_SEC", defaultLeadSec)) * time.Second,
 		gap1:   time.Duration(envInt("VIRGINBOT_GAP1_SEC", defaultGap1Sec)) * time.Second,
@@ -213,14 +216,15 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	last := o.start.Add(-24 * time.Hour)
 	if !st.booked && !st.missNotified && !dueT.Before(last) {
 		st.missNotified = true
+		lang := e.langOf(o.rule.UserID)
 		reason := st.lastError
 		if reason == "" {
-			reason = "no llegó a haber plaza reservable"
+			reason = i18n.T(lang, "email.failed.noreason")
 		}
 		e.notify(o.rule.UserID,
-			fmt.Sprintf("VirginBot: ✗ NO se pudo reservar %s", o.rule.Name),
-			fmt.Sprintf("No he conseguido reservar esta clase:\n\n%s\nIntentos: %d\nÚltimo motivo: %s\n\nLo intenté a la hora de la clase desde que abrió el plazo hasta 24h antes.\n",
-				classLines(o.rule.Name, o.rule.Club, o.start), st.attempts, reason))
+			i18n.T(lang, "email.failed.subject", o.rule.Name),
+			i18n.T(lang, "email.failed.body",
+				classLines(lang, o.rule.Name, o.rule.Club, o.start), st.attempts, reason))
 	}
 }
 
@@ -370,16 +374,24 @@ func bookableBeds(matches []*calendar.Class) []*calendar.Class {
 	return out
 }
 
+// langOf resuelve el idioma del usuario (it/es/en) con fallback a Default.
+func (e *Engine) langOf(userID int64) i18n.Lang {
+	if e.lang == nil {
+		return i18n.Default
+	}
+	return i18n.Coerce(e.lang(userID))
+}
+
 // notifyBooked avisa al socio de una reserva conseguida (incluye los intentos si
 // los hubo: reserva directa, confirmación tras error de la API o reconciliación).
 func (e *Engine) notifyBooked(o occ, st *occState) {
-	body := fmt.Sprintf("¡Reserva conseguida! Te he apuntado automáticamente:\n\n%s\n",
-		classLines(o.rule.Name, o.rule.Club, o.start))
+	lang := e.langOf(o.rule.UserID)
+	body := i18n.T(lang, "email.booked.body", classLines(lang, o.rule.Name, o.rule.Club, o.start))
 	if st.attempts > 0 {
-		body += fmt.Sprintf("Intentos: %d\n", st.attempts)
+		body += i18n.T(lang, "email.attempts", st.attempts)
 	}
-	body += "\nNos vemos en clase 💪\n"
-	e.notify(o.rule.UserID, fmt.Sprintf("VirginBot: ✓ reservada %s", o.rule.Name), body)
+	body += i18n.T(lang, "email.booked.outro")
+	e.notify(o.rule.UserID, i18n.T(lang, "email.booked.subject", o.rule.Name), body)
 }
 
 // ---- estado ----
@@ -401,5 +413,3 @@ func (e *Engine) ensureState(o occ) *occState {
 	}
 	return st
 }
-
-var weekdaysIT = [...]string{"Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"}

@@ -110,7 +110,7 @@ func main() {
 		// puede haber cuajado; así la siguiente ronda del motor lo detecta (overlay).
 		srv.InvalidateUser(userID)
 		return bookErr
-	}, notifyUser)
+	}, notifyUser, acc.Lang)
 	go engine.Run(make(chan struct{}))
 
 	log.Printf("API escuchando en http://localhost%s", addr)
