@@ -53,8 +53,7 @@ VA_PASS: {yourpassword}
 ## Mejoras
 
 - [ ] Añadir i18n automática, inglés, español e Italiano.
-- Añadir a la whitelist nickol8813@hotmail.it, andreachisesi@hotmail.it, c.aresvigo@gmail.com
 - Dejar el repositorio sin datos comprometidos (emails, environments, API_Keys, etc).
-- Añadir al usuario mariopaez_99@hotmail.com una vista de admin, que es capaz de ver las automatizaciones de todos los usuarios de la aplicación, reservas, etc.
+- Añadir una vista de admin, que es capaz de ver las automatizaciones de todos los usuarios de la aplicación, reservas, etc.
 - Aplicación móvil? Posibilidad?
 - En el readme una breve explicación de la APP que sea atractiva y un enlace a un documento que explique más detalladamente como hice X cosas. A algo más técnico.
