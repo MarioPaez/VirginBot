@@ -7,65 +7,65 @@ import (
 	"testing"
 )
 
-// TestMigrateRealDB valida la migración mono→multi-usuario sobre una COPIA de la
-// base de datos real del proyecto (../virginbot.db), sin tocar la original. Si no
-// existe, se omite (p. ej. en CI con BD limpia).
+// TestMigrateRealDB validates the single→multi-user migration on a COPY of the
+// project's real database (../virginbot.db), without touching the original. If it
+// doesn't exist, it's skipped (e.g. in CI with a clean DB).
 func TestMigrateRealDB(t *testing.T) {
 	src := filepath.Join("..", "virginbot.db")
 	if _, err := os.Stat(src); err != nil {
-		t.Skip("no hay virginbot.db; se omite el test de migración real")
+		t.Skip("no virginbot.db; skipping the real migration test")
 	}
 	dst := filepath.Join(t.TempDir(), "copy.db")
-	// Copiamos los tres ficheros (db + WAL + SHM) para preservar datos no
-	// volcados aún al fichero principal.
+	// Copy the three files (db + WAL + SHM) to preserve data not yet flushed to the
+	// main file.
 	for _, suf := range []string{"", "-wal", "-shm"} {
 		if err := copyFile(src+suf, dst+suf); err != nil && suf == "" {
-			t.Fatalf("copiar %s: %v", src+suf, err)
+			t.Fatalf("copy %s: %v", src+suf, err)
 		}
 	}
 
 	d, err := Open(dst)
 	if err != nil {
-		t.Fatalf("Open (migración): %v", err)
+		t.Fatalf("Open (migration): %v", err)
 	}
 	defer d.Close()
 
-	// Tablas presentes.
+	// Tables present.
 	for _, tbl := range []string{"users", "bookings", "automations", "sessions"} {
 		if ok, _ := tableExists(d, tbl); !ok {
-			t.Errorf("falta la tabla %q tras migrar", tbl)
+			t.Errorf("missing table %q after migrating", tbl)
 		}
 	}
-	// La caché de calendario en BD ya no existe (calendario en vivo desde vapi).
+	// The DB calendar cache no longer exists (calendar is live from vapi).
 	if ok, _ := tableExists(d, "day_cache"); ok {
-		t.Errorf("day_cache debería haberse eliminado")
+		t.Errorf("day_cache should have been dropped")
 	}
-	// Columnas user_id añadidas.
+	// user_id columns added.
 	for _, tc := range []struct{ table, col string }{
 		{"automations", "user_id"}, {"sessions", "user_id"},
 	} {
 		if ok, _ := hasColumn(d, tc.table, tc.col); !ok {
-			t.Errorf("%s no tiene la columna %s", tc.table, tc.col)
+			t.Errorf("%s is missing the %s column", tc.table, tc.col)
 		}
 	}
-	// El usuario legado debe haberse migrado (id=1) si había credenciales.
+	// The legacy user must have been migrated (id=1) if there were credentials.
 	if ok, _ := tableExists(d, "credentials"); ok {
 		var credCount int
 		d.QueryRow(`SELECT COUNT(*) FROM credentials WHERE id = 1`).Scan(&credCount)
 		if credCount > 0 {
 			var email string
 			if err := d.QueryRow(`SELECT email FROM users WHERE id = 1`).Scan(&email); err != nil {
-				t.Errorf("usuario legado no migrado a users(id=1): %v", err)
+				t.Errorf("legacy user not migrated to users(id=1): %v", err)
 			} else if email == "" {
-				t.Errorf("usuario migrado sin email")
+				t.Errorf("migrated user without email")
 			}
 		}
 	}
-	// Re-abrir debe ser idempotente (sin error).
+	// Re-opening must be idempotent (no error).
 	d.Close()
 	d2, err := Open(dst)
 	if err != nil {
-		t.Fatalf("segunda apertura (idempotencia): %v", err)
+		t.Fatalf("second open (idempotency): %v", err)
 	}
 	d2.Close()
 }

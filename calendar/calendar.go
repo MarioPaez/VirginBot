@@ -1,35 +1,35 @@
-// Package calendar define el modelo de una clase. Los datos se obtienen vía el
-// paquete vapi (API móvil JSON de Virgin); aquí solo vive el tipo Class y el
-// mapeo de clubes.
+// Package calendar defines the model of a class. The data comes from the vapi
+// package (Virgin's JSON mobile API); only the Class type and the club mapping
+// live here.
 package calendar
 
-// Clubes (clubId numérico de vapi).
+// Clubs (numeric vapi clubId).
 const (
 	ClubCorsoComo = 209
 	ClubCavour    = 224
 )
 
-// ClubNames mapea clubId → nombre legible.
+// ClubNames maps clubId → human-readable name.
 var ClubNames = map[int]string{
 	ClubCorsoComo: "Milano Corso Como",
 	ClubCavour:    "Milano Cavour",
 }
 
-// Class es una clase programada en el calendario.
+// Class is a class scheduled in the calendar.
 type Class struct {
 	Date       string `json:"date"`  // YYYY-MM-DD
 	Start      string `json:"start"` // HH:MM
 	End        string `json:"end"`   // HH:MM
-	Name       string `json:"name"`  // p. ej. "Calisthenics Performance"
-	Club       string `json:"club"`  // nombre legible del club
+	Name       string `json:"name"`  // e.g. "Calisthenics Performance"
+	Club       string `json:"club"`  // human-readable club name
 	Studio     string `json:"studio"`
-	Instructor string `json:"instructor"` // p. ej. "Alessandro Restelli"
+	Instructor string `json:"instructor"` // e.g. "Alessandro Restelli"
 	ClubID     int    `json:"clubId"`     // 209 / 224
-	ClassID    int    `json:"classId"`    // id de la clase (para reservar)
-	SessionID  int    `json:"sessionId"`  // id de la sesión (para reservar/cancelar)
-	BookingID  int    `json:"bookingId"`  // id de la reserva del socio (para cancelar), solo si Booked
-	Booked     bool   `json:"booked"`     // true si ya está reservada por mí
-	// Status: "bookable" (reservable ya), "booked" (reservada por mí),
-	// "waitlist" (llena, lista de espera), "unavailable" (plazo no abierto/otro).
+	ClassID    int    `json:"classId"`    // class id (used to book)
+	SessionID  int    `json:"sessionId"`  // session id (used to book/cancel)
+	BookingID  int    `json:"bookingId"`  // member's booking id (used to cancel), only if Booked
+	Booked     bool   `json:"booked"`     // true if already booked by me
+	// Status: "bookable" (bookable now), "booked" (booked by me),
+	// "waitlist" (full, waiting list), "unavailable" (window not open / other).
 	Status string `json:"status"`
 }

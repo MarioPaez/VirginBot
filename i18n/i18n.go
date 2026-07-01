@@ -1,6 +1,6 @@
-// Package i18n centraliza las cadenas traducibles que ve el usuario en
-// it/es/en: los nombres de fecha y los textos de los emails. La interfaz web
-// tiene su propio catálogo en el frontend (server/web/index.html).
+// Package i18n centralizes the user-facing translatable strings in it/es/en:
+// the date names and the email texts. The web UI has its own catalog in the
+// frontend (server/web/index.html).
 package i18n
 
 import (
@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Lang es un idioma soportado (código ISO 639-1 en minúscula).
+// Lang is a supported language (lowercase ISO 639-1 code).
 type Lang string
 
 const (
@@ -18,18 +18,18 @@ const (
 	EN Lang = "en"
 )
 
-// Default es el idioma de respaldo cuando no se reconoce ninguno.
+// Default is the fallback language when none is recognized.
 const Default = EN
 
 var supported = map[Lang]bool{IT: true, ES: true, EN: true}
 
-// Normalize convierte un valor de cabecera Accept-Language (o un código suelto)
-// al idioma soportado más adecuado; si ninguno encaja, devuelve Default.
-// Ej.: "es-ES,es;q=0.9,en;q=0.8" → ES.
+// Normalize converts an Accept-Language header value (or a lone code) to the
+// best supported language; if none fits, it returns Default.
+// E.g.: "es-ES,es;q=0.9,en;q=0.8" → ES.
 func Normalize(accept string) Lang {
 	for _, part := range strings.Split(accept, ",") {
 		code := strings.TrimSpace(part)
-		if i := strings.IndexByte(code, ';'); i >= 0 { // quita ";q=0.9"
+		if i := strings.IndexByte(code, ';'); i >= 0 { // strip ";q=0.9"
 			code = code[:i]
 		}
 		code = strings.ToLower(strings.TrimSpace(code))
@@ -43,7 +43,7 @@ func Normalize(accept string) Lang {
 	return Default
 }
 
-// Coerce devuelve el idioma si está soportado; si no, Default.
+// Coerce returns the language if supported; otherwise Default.
 func Coerce(code string) Lang {
 	if l := Lang(strings.ToLower(strings.TrimSpace(code))); supported[l] {
 		return l
@@ -63,24 +63,24 @@ var months = map[Lang][13]string{
 	EN: {"", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"},
 }
 
-// Weekday devuelve el nombre del día de la semana (0=Domingo) en el idioma dado.
+// Weekday returns the weekday name (0=Sunday) in the given language.
 func Weekday(lang Lang, wd int) string { return weekdays[Coerce(string(lang))][wd] }
 
-// FormatDateTime: "Lunedì 28 giugno 2026, 17:00" (según idioma).
+// FormatDateTime: "Lunedì 28 giugno 2026, 17:00" (per language).
 func FormatDateTime(lang Lang, t time.Time) string {
 	l := Coerce(string(lang))
 	return fmt.Sprintf("%s %d %s %d, %02d:%02d",
 		weekdays[l][int(t.Weekday())], t.Day(), months[l][int(t.Month())], t.Year(), t.Hour(), t.Minute())
 }
 
-// FormatDate: "Lunedì 28 giugno 2026" (según idioma).
+// FormatDate: "Lunedì 28 giugno 2026" (per language).
 func FormatDate(lang Lang, t time.Time) string {
 	l := Coerce(string(lang))
 	return fmt.Sprintf("%s %d %s %d", weekdays[l][int(t.Weekday())], t.Day(), months[l][int(t.Month())], t.Year())
 }
 
-// messages: catálogo de cadenas con marcadores estilo fmt. Las claves son
-// estables; el fallback es Default si falta una traducción.
+// messages: catalog of strings with fmt-style placeholders. The keys are
+// stable; the fallback is Default when a translation is missing.
 var messages = map[Lang]map[string]string{
 	ES: {
 		"email.booked.subject":  "VirginBot: ✓ reservada %s",
@@ -144,8 +144,8 @@ var messages = map[Lang]map[string]string{
 	},
 }
 
-// T busca la cadena por clave en el idioma dado (con fallback a Default) y le
-// aplica fmt.Sprintf con los argumentos.
+// T looks up the string by key in the given language (falling back to Default)
+// and applies fmt.Sprintf with the arguments.
 func T(lang Lang, key string, args ...any) string {
 	l := Coerce(string(lang))
 	s, ok := messages[l][key]

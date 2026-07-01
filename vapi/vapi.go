@@ -1,6 +1,6 @@
-// Package vapi habla con la API móvil moderna de Virgin Active
-// (vapi.virginactive.com) — la fuente de verdad que usa la app, en JSON.
-// Sustituye al antiguo scraping de www.virginactive.it.
+// Package vapi talks to Virgin Active's modern mobile API
+// (vapi.virginactive.com) — the source of truth the app uses, in JSON.
+// It replaces the old scraping of www.virginactive.it.
 package vapi
 
 import (
@@ -26,18 +26,17 @@ const (
 	userAgent  = "Ktor client"
 )
 
-// ErrUnauthorized indica token caducado/ inválido (HTTP 401) → re-login.
-var ErrUnauthorized = errors.New("vapi: no autorizado (token caducado)")
+// ErrUnauthorized means an expired/invalid token (HTTP 401) → re-login.
+var ErrUnauthorized = errors.New("vapi: unauthorized (expired token)")
 
-// Client llama a la API con la API key estática de la app + el token de sesión
-// del usuario.
+// Client calls the API with the app's static API key + the user's session token.
 type Client struct {
 	http   *http.Client
 	apiKey string
 	token  string
 }
 
-// Login crea una sesión (POST /sessions) y guarda el token del usuario.
+// Login creates a session (POST /sessions) and stores the user's token.
 func Login(apiKey, email, pass string) (*Client, error) {
 	c := &Client{http: &http.Client{Timeout: 30 * time.Second}, apiKey: apiKey}
 	var out struct {
@@ -49,16 +48,16 @@ func Login(apiKey, email, pass string) (*Client, error) {
 		return nil, err
 	}
 	if out.Token == "" {
-		return nil, fmt.Errorf("vapi login: respuesta sin token")
+		return nil, fmt.Errorf("vapi login: response without token")
 	}
 	c.token = out.Token
 	return c, nil
 }
 
-// ---- llamadas de dominio ----
+// ---- domain calls ----
 
 type apiInstructor struct {
-	FirstName string `json:"firstName"` // contiene el nombre completo del instructor
+	FirstName string `json:"firstName"` // holds the instructor's full name
 }
 
 type apiClass struct {
@@ -87,8 +86,8 @@ type apiDay struct {
 	Classes []apiClass `json:"classes"`
 }
 
-// Classes devuelve las clases de un club en el rango [start, end] (vapi acepta
-// rango, así que todo el calendario son pocas llamadas).
+// Classes returns a club's classes in the [start, end] range (vapi accepts a
+// range, so the whole calendar is just a few calls).
 func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, error) {
 	q := url.Values{
 		"startDate": {start.Format("2006-01-02")},
@@ -115,7 +114,7 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 }
 
 type apiBooking struct {
-	ID          int    `json:"id"` // id de la reserva del socio
+	ID          int    `json:"id"` // member's booking id
 	BookingDate string `json:"bookingDate"`
 	Class       struct {
 		ID              int             `json:"id"`
@@ -128,8 +127,8 @@ type apiBooking struct {
 	} `json:"class"`
 }
 
-// MyBookings devuelve las reservas activas del socio en el rango dado, como
-// Class con Booked=true y los IDs necesarios para cancelar.
+// MyBookings returns the member's active bookings in the given range, as Class
+// with Booked=true and the IDs needed to cancel.
 func (c *Client) MyBookings(start, end time.Time) ([]calendar.Class, error) {
 	q := url.Values{
 		"startDate": {start.Format("2006-01-02")},
@@ -155,14 +154,14 @@ func (c *Client) MyBookings(start, end time.Time) ([]calendar.Class, error) {
 	return out, nil
 }
 
-// Book reserva una clase (POST con cuerpo vacío).
+// Book books a class (POST with an empty body).
 func (c *Client) Book(clubID, classID, sessionID int, date string) error {
 	q := url.Values{"date": {date}}
 	path := fmt.Sprintf("/clubs/%d/classes/%d/sessions/%d", clubID, classID, sessionID)
 	return c.do(http.MethodPost, path, q, nil, nil)
 }
 
-// Cancel cancela una reserva.
+// Cancel cancels a booking.
 func (c *Client) Cancel(sessionID, bookingID, clubID, classID int, date string) error {
 	q := url.Values{
 		"date":               {date},
@@ -173,7 +172,7 @@ func (c *Client) Cancel(sessionID, bookingID, clubID, classID int, date string) 
 	return c.do(http.MethodDelete, fmt.Sprintf("/member/bookings/sessions/%d", sessionID), q, nil, nil)
 }
 
-// ---- transporte ----
+// ---- transport ----
 
 func (c *Client) do(method, path string, query url.Values, body, out any) error {
 	u := base + path
@@ -218,7 +217,7 @@ func (c *Client) do(method, path string, query url.Values, body, out any) error 
 	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("vapi %s %s: JSON inválido: %w", method, path, err)
+			return fmt.Errorf("vapi %s %s: invalid JSON: %w", method, path, err)
 		}
 	}
 	return nil
@@ -239,7 +238,7 @@ func mapStatus(bookable string) string {
 	}
 }
 
-// hhmm recorta "HH:MM:SS" → "HH:MM".
+// hhmm trims "HH:MM:SS" → "HH:MM".
 func hhmm(t string) string {
 	if len(t) >= 5 {
 		return t[:5]
@@ -247,7 +246,7 @@ func hhmm(t string) string {
 	return t
 }
 
-// addMinutes suma minutos a una hora "HH:MM" y devuelve "HH:MM".
+// addMinutes adds minutes to an "HH:MM" time and returns "HH:MM".
 func addMinutes(start string, mins int) string {
 	t, err := time.Parse("15:04", start)
 	if err != nil {

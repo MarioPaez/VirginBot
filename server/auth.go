@@ -9,13 +9,13 @@ import (
 	"github.com/MarioPaez/VirginBot/vapi"
 )
 
-// authTTL: el token de vapi dura ~2h; lo refrescamos (re-login) antes.
+// authTTL: the vapi token lasts ~2h; we refresh it (re-login) before then.
 const authTTL = 100 * time.Minute
 
-var errNoCreds = errors.New("no hay credenciales: inicia sesión")
+var errNoCreds = errors.New("no credentials: please sign in")
 
-// Auth mantiene un cliente vapi autenticado POR USUARIO, re-logueando con las
-// credenciales guardadas cuando el token caduca.
+// Auth keeps a PER-USER authenticated vapi client, re-logging in with the stored
+// credentials when the token expires.
 type Auth struct {
 	store  *account.Store
 	apiKey string
@@ -33,8 +33,8 @@ func NewAuth(store *account.Store, apiKey string) *Auth {
 	return &Auth{store: store, apiKey: apiKey, clients: map[int64]*authEntry{}}
 }
 
-// Login valida las credenciales contra vapi, las guarda cifradas (creando/
-// actualizando el usuario) y cachea la sesión. Devuelve el id del usuario.
+// Login validates the credentials against vapi, stores them encrypted (creating/
+// updating the user) and caches the session. Returns the user id.
 func (a *Auth) Login(email, pass string) (int64, error) {
 	client, err := vapi.Login(a.apiKey, email, pass)
 	if err != nil {
@@ -50,8 +50,8 @@ func (a *Auth) Login(email, pass string) (int64, error) {
 	return userID, nil
 }
 
-// ClientFor devuelve un cliente vapi autenticado para el usuario, re-logueando
-// con sus credenciales guardadas si hace falta.
+// ClientFor returns an authenticated vapi client for the user, re-logging in with
+// the stored credentials if needed.
 func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -72,18 +72,18 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 
 func (a *Auth) Email(userID int64) string { return a.store.Email(userID) }
 
-// Invalidate descarta el cliente cacheado del usuario, forzando un re-login en la
-// próxima llamada. Se usa cuando vapi responde 401 (token invalidado fuera de
-// banda, p. ej. al iniciar sesión en el móvil) antes de que expire authTTL.
+// Invalidate drops the user's cached client, forcing a re-login on the next call.
+// Used when vapi returns 401 (token invalidated out of band, e.g. after signing
+// in on the phone) before authTTL expires.
 func (a *Auth) Invalidate(userID int64) {
 	a.mu.Lock()
 	delete(a.clients, userID)
 	a.mu.Unlock()
 }
 
-// Do ejecuta fn con el cliente autenticado del usuario y, si vapi devuelve 401,
-// descarta el cliente, re-loguea y reintenta UNA vez. Centraliza la recuperación
-// de tokens caducados que el cacheo por TTL no detecta.
+// Do runs fn with the user's authenticated client and, if vapi returns 401, drops
+// the client, re-logs in and retries ONCE. Centralizes recovery from expired
+// tokens that TTL caching doesn't catch.
 func (a *Auth) Do(userID int64, fn func(*vapi.Client) error) error {
 	c, err := a.ClientFor(userID)
 	if err != nil {

@@ -13,41 +13,41 @@ import (
 	"github.com/MarioPaez/VirginBot/i18n"
 )
 
-// Política de reserva: PRECISA, no por sondeo continuo. Las plazas de una clase
-// se habilitan cuando abre el plazo (calistenia 7 días antes, solarium 2), a la
-// hora de la clase. Por eso solo intentamos en esos instantes —a la hora de la
-// lección, cada día desde la apertura hasta 24h antes— en vez de machacar a
-// Virgin cada pocos minutos (ineficiente y motivo de bloqueo).
-// Parámetros del disparo. El plazo de Virgin a veces se habilita unos segundos
-// DESPUÉS de la hora exacta de la clase, así que damos un margen inicial y varios
-// intentos espaciados. Tunables por env (VIRGINBOT_ATTEMPTS/GAP_SEC/LEAD_SEC) sin
-// recompilar, porque el retardo real es empírico.
+// Booking policy: PRECISE, not continuous polling. A class's slots open when the
+// booking window opens (calisthenics 7 days before, solarium 2), at the class
+// time. So we only try at those instants —at the class time, each day from the
+// window opening until 24h before— instead of hammering Virgin every few minutes
+// (inefficient and a reason to get blocked).
+// Trigger parameters. Virgin's window sometimes opens a few seconds AFTER the
+// exact class time, so we allow an initial lead and several spaced attempts.
+// Tunable via env (VIRGINBOT_ATTEMPTS/GAP_SEC/LEAD_SEC) without recompiling,
+// because the real delay is empirical.
 const (
-	defaultAttempts = 9                // intentos por disparo (~1 min de ventana con los gaps de abajo)
-	defaultLeadSec  = 0                // margen tras la hora antes del 1er intento (0 = a la hora exacta)
-	defaultGap1Sec  = 4                // espera entre el 1er y el 2º intento (corta: por si abre con unos segundos de retraso)
-	defaultGapSec   = 8                // espera entre los intentos siguientes
-	maxIdle         = 5 * time.Minute  // re-evalúa la agenda (sin red) para captar reglas nuevas
-	triggerGrace    = 15 * time.Minute // un disparo solo cuenta si estamos a <=15min de su hora (no recupera disparos viejos)
-	horizonDays     = 8                // cubre la ventana más larga (calistenia, 7 días)
+	defaultAttempts = 9                // attempts per fire (~1 min window with the gaps below)
+	defaultLeadSec  = 0                // lead after the hour before the 1st attempt (0 = at the exact hour)
+	defaultGap1Sec  = 4                // wait between the 1st and 2nd attempt (short: in case it opens a few seconds late)
+	defaultGapSec   = 8                // wait between the following attempts
+	maxIdle         = 5 * time.Minute  // re-evaluate the schedule (no network) to pick up new rules
+	triggerGrace    = 15 * time.Minute // a fire only counts if we're within <=15min of its time (doesn't recover old fires)
+	horizonDays     = 8                // covers the longest window (calisthenics, 7 days)
 )
 
-// Engine ejecuta las reglas de TODOS los usuarios con disparos precisos.
+// Engine runs the rules of ALL users with precise fires.
 type Engine struct {
 	store    *Store
-	fetchDay func(userID int64, date string) ([]calendar.Class, error) // fetch fresco de un día (autenticado, curado)
+	fetchDay func(userID int64, date string) ([]calendar.Class, error) // fresh fetch of a day (authenticated, curated)
 	book     func(userID int64, clubID, classID, sessionID int, date string) error
 	notify   func(userID int64, subject, body string)
-	lang     func(userID int64) string // idioma del usuario para los emails (it/es/en); nil = Default
+	lang     func(userID int64) string // user's language for emails (it/es/en); nil = Default
 	loc      *time.Location
-	rounds   int           // intentos por disparo
-	lead     time.Duration // margen tras la hora antes del 1er intento
-	gap1     time.Duration // espera entre el 1er y el 2º intento
-	gap      time.Duration // espera entre los intentos siguientes
-	debug    bool          // VIRGINBOT_DEBUG: loguea cada evaluación (para observar en local)
+	rounds   int           // attempts per fire
+	lead     time.Duration // lead after the hour before the 1st attempt
+	gap1     time.Duration // wait between the 1st and 2nd attempt
+	gap      time.Duration // wait between the following attempts
+	debug    bool          // VIRGINBOT_DEBUG: logs every evaluation (for local observation)
 
 	mu    sync.Mutex
-	state map[string]*occState // clave: userID|ruleID|fecha
+	state map[string]*occState // key: userID|ruleID|date
 }
 
 type occState struct {
@@ -55,7 +55,7 @@ type occState struct {
 	attempts     int
 	lastError    string
 	missNotified bool
-	lastFired    time.Time // último disparo ya ejecutado (evita repetir el mismo)
+	lastFired    time.Time // last fire already executed (avoids repeating it)
 }
 
 func NewEngine(
@@ -83,7 +83,7 @@ func NewEngine(
 	}
 }
 
-// envInt lee un entero positivo de una variable de entorno, o devuelve def.
+// envInt reads a positive integer from an environment variable, or returns def.
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -93,7 +93,7 @@ func envInt(key string, def int) int {
 	return def
 }
 
-// occ es una ocurrencia concreta de una regla (un día concreto) de un usuario.
+// occ is a concrete occurrence of a rule (a specific day) for a user.
 type occ struct {
 	rule  Rule
 	date  string
@@ -111,32 +111,32 @@ func windowOf(o occ) int {
 	return WindowDays(o.rule.Name)
 }
 
-// triggers son los instantes en que intentamos reservar la ocurrencia: a la hora
-// de la clase, cada día desde la apertura del plazo (T - ventana) hasta 24h antes.
+// triggers are the instants at which we try to book the occurrence: at the class
+// time, each day from the window opening (T - window) until 24h before.
 func (o occ) triggers() []time.Time {
 	w := windowOf(o)
 	ts := make([]time.Time, 0, w)
-	for k := w; k >= 1; k-- { // T-w, T-(w-1), ..., T-1  (ascendente)
-		ts = append(ts, o.start.AddDate(0, 0, -k)) // AddDate mantiene la hora de pared aunque cambie el horario (DST)
+	for k := w; k >= 1; k-- { // T-w, T-(w-1), ..., T-1  (ascending)
+		ts = append(ts, o.start.AddDate(0, 0, -k)) // AddDate keeps the wall-clock time even across DST changes
 	}
 	return ts
 }
 
-// Run duerme hasta el próximo disparo y solo entonces toca la red. Entre disparos
-// despierta como mucho cada maxIdle para captar reglas nuevas (sin llamar a Virgin).
+// Run sleeps until the next fire and only then touches the network. Between fires
+// it wakes at most every maxIdle to pick up new rules (without calling Virgin).
 func (e *Engine) Run(stop <-chan struct{}) {
 	for {
 		now := time.Now().In(e.loc)
 		occs := e.occurrences(now)
 		if e.debug {
-			log.Printf("[debug] %d ocurrencia(s) pendientes", len(occs))
+			log.Printf("[debug] %d pending occurrence(s)", len(occs))
 		}
 		for _, o := range occs {
 			e.maybeFire(o, now)
 		}
 		sleep := e.untilNext(now, occs)
 		if e.debug {
-			log.Printf("[debug] próximo intento en %s", sleep.Round(time.Second))
+			log.Printf("[debug] next attempt in %s", sleep.Round(time.Second))
 		}
 		select {
 		case <-stop:
@@ -146,8 +146,8 @@ func (e *Engine) Run(stop <-chan struct{}) {
 	}
 }
 
-// occurrences calcula, de las reglas de todos los usuarios, las próximas
-// ocurrencias no reservadas (sin tocar la red: solo por día de la semana y hora).
+// occurrences computes, across every user's rules, the upcoming unbooked
+// occurrences (without touching the network: only by weekday and time).
 func (e *Engine) occurrences(now time.Time) []occ {
 	var out []occ
 	for _, r := range e.store.ListAll() {
@@ -174,8 +174,9 @@ func (e *Engine) occurrences(now time.Time) []occ {
 	return out
 }
 
-// maybeFire dispara un intento si toca: hay un disparo (hora de la clase) vencido
-// y aún no ejecutado. Tras el último disparo (24h antes) sin éxito, avisa por email.
+// maybeFire fires an attempt when due: there's a fire (class time) that's past
+// and not yet executed. After the last fire (24h before) without success, it
+// notifies by email.
 func (e *Engine) maybeFire(o occ, now time.Time) {
 	st := e.ensureState(o)
 	if st.booked {
@@ -183,20 +184,20 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	}
 	trs := o.triggers()
 
-	// Disparo vencido más reciente aún no ejecutado (si nos saltamos varios por
-	// estar parados, ejecuta solo uno para ponernos al día).
+	// Most recent past fire not yet executed (if we skipped several while stopped,
+	// run only one to catch up).
 	var dueT time.Time
 	hasFuture := false
 	for _, t := range trs {
 		if t.After(now) {
 			hasFuture = true
 		} else if t.After(st.lastFired) && now.Sub(t) <= triggerGrace {
-			dueT = t // vencido hace poco (a su hora) y aún no ejecutado; no recupera disparos viejos
+			dueT = t // recently due (at its time) and not yet executed; doesn't recover old fires
 		}
 	}
 
-	// Fallback: regla creada con el plazo ya abierto y SIN disparos futuros (en las
-	// últimas 24h antes de la clase). Intenta una vez de inmediato, no esperar.
+	// Fallback: rule created with the window already open and WITHOUT future fires
+	// (in the last 24h before the class). Try once immediately, don't wait.
 	if dueT.IsZero() && !hasFuture && st.lastFired.IsZero() && st.attempts == 0 {
 		open := o.start.AddDate(0, 0, -windowOf(o))
 		if !now.Before(open) && now.Before(o.start) {
@@ -207,12 +208,12 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 		return
 	}
 
-	log.Printf("automation: u%d ▶ DISPARO %s · %s @ %s (clase del %s) — intentando reservar",
+	log.Printf("automation: u%d ▶ FIRE %s · %s @ %s (class on %s) — attempting to book",
 		o.rule.UserID, o.rule.Name, o.rule.Club, o.rule.Start, o.date)
 	e.attempt(o, st)
 	st.lastFired = dueT
 
-	// Si ya fue el último disparo (a 24h) y no se consiguió, avisa una sola vez.
+	// If this was the last fire (at 24h) and it didn't succeed, notify once.
 	last := o.start.Add(-24 * time.Hour)
 	if !st.booked && !st.missNotified && !dueT.Before(last) {
 		st.missNotified = true
@@ -228,94 +229,95 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	}
 }
 
-// attempt hace hasta attemptRounds rondas (fetch + reserva) espaciadas attemptGap.
-// La 2ª ronda cubre un fallo transitorio o un pequeño retardo en que Virgin marque
-// la clase reservable justo al abrir el plazo.
+// attempt runs up to e.rounds rounds (fetch + book) spaced by e.gap. The 2nd
+// round covers a transient failure or a small delay in Virgin marking the class
+// bookable right as the window opens.
 func (e *Engine) attempt(o occ, st *occState) {
 	tag := fmt.Sprintf("u%d %s %s @ %s", o.rule.UserID, o.rule.Name, o.date, o.rule.Start)
 	if e.lead > 0 {
-		log.Printf("automation: %s — esperando %s tras la hora (el plazo a veces se habilita unos segundos tarde)", tag, e.lead)
+		log.Printf("automation: %s — waiting %s after the hour (the window sometimes opens a few seconds late)", tag, e.lead)
 		time.Sleep(e.lead)
 	}
 	for round := 0; round < e.rounds && !st.booked; round++ {
 		classes, err := e.fetchDay(o.rule.UserID, o.date)
 		if err != nil {
 			st.lastError = err.Error()
-			log.Printf("automation: %s — ronda %d/%d: ERROR al consultar el calendario: %v", tag, round+1, e.rounds, err)
+			log.Printf("automation: %s — round %d/%d: ERROR fetching the calendar: %v", tag, round+1, e.rounds, err)
 		} else {
 			matches := findMatches(classes, o.rule)
 			switch {
 			case len(matches) == 0:
-				st.lastError = "no está en el calendario aún"
-				log.Printf("automation: %s — ronda %d/%d: la clase aún no está en el calendario", tag, round+1, e.rounds)
+				st.lastError = "not in the calendar yet"
+				log.Printf("automation: %s — round %d/%d: the class isn't in the calendar yet", tag, round+1, e.rounds)
 			case bookedMatch(matches) != nil:
 				st.booked = true
 				if st.attempts > 0 {
-					// Habíamos intentado reservar: la reserva SÍ cuajó (aunque la API
-					// devolviera error). Lo confirmamos como éxito.
-					log.Printf("automation: ✓ %s — RESERVADA (confirmada tras %d intento(s), pese a error de la API)", tag, st.attempts)
+					// We had tried to book: the booking DID go through (even though the
+					// API returned an error). We confirm it as a success.
+					log.Printf("automation: ✓ %s — BOOKED (confirmed after %d attempt(s), despite the API error)", tag, st.attempts)
 					e.notifyBooked(o, st)
 				} else {
-					log.Printf("automation: %s — ya estaba reservada, nada que hacer", tag)
+					log.Printf("automation: %s — already booked, nothing to do", tag)
 				}
 				return
 			default:
-				// El Solarium expone varias "camas" reservables a la misma hora.
-				// Probamos las que el calendario marca reservables, una a una, hasta
-				// que el POST acepte: ese estado a veces miente (TOO_LATE_TO_BOOK).
+				// The Solarium exposes several bookable "beds" at the same time. We try
+				// the ones the calendar marks bookable, one by one, until the POST
+				// accepts: that status sometimes lies (TOO_LATE_TO_BOOK).
 				beds := bookableBeds(matches)
 				if len(beds) == 0 {
-					st.lastError = "no reservable (status=" + matches[0].Status + ")"
-					log.Printf("automation: %s — ronda %d/%d: no reservable (status=%q, p. ej. llena o plazo no abierto)", tag, round+1, e.rounds, matches[0].Status)
+					st.lastError = "not bookable (status=" + matches[0].Status + ")"
+					log.Printf("automation: %s — round %d/%d: not bookable (status=%q, e.g. full or window not open)", tag, round+1, e.rounds, matches[0].Status)
 					break
 				}
-				log.Printf("automation: %s — ronda %d/%d: %d cama(s) RESERVABLE(s), probando…", tag, round+1, e.rounds, len(beds))
+				log.Printf("automation: %s — round %d/%d: %d bookable bed(s), trying…", tag, round+1, e.rounds, len(beds))
 				for bi, c := range beds {
 					st.attempts++
-					log.Printf("automation: %s — ronda %d/%d cama %d/%d (classId=%d sessionId=%d), reservando…", tag, round+1, e.rounds, bi+1, len(beds), c.ClassID, c.SessionID)
+					log.Printf("automation: %s — round %d/%d bed %d/%d (classId=%d sessionId=%d), booking…", tag, round+1, e.rounds, bi+1, len(beds), c.ClassID, c.SessionID)
 					if err := e.book(o.rule.UserID, c.ClubID, c.ClassID, c.SessionID, o.date); err != nil {
 						st.lastError = err.Error()
-						log.Printf("automation: %s — ronda %d/%d cama %d/%d: FALLÓ la reserva: %v", tag, round+1, e.rounds, bi+1, len(beds), err)
+						log.Printf("automation: %s — round %d/%d bed %d/%d: booking FAILED: %v", tag, round+1, e.rounds, bi+1, len(beds), err)
 						continue
 					}
 					st.booked = true
-					log.Printf("automation: ✓ %s — RESERVADA (cama %d/%d, intento %d)", tag, bi+1, len(beds), st.attempts)
+					log.Printf("automation: ✓ %s — BOOKED (bed %d/%d, attempt %d)", tag, bi+1, len(beds), st.attempts)
 					e.notifyBooked(o, st)
 					return
 				}
 			}
 		}
 		if round < e.rounds-1 {
-			wait := e.gap // 7s entre los intentos siguientes
+			wait := e.gap // 7s between the following attempts
 			if round == 0 {
-				wait = e.gap1 // 5s entre el 1º y el 2º
+				wait = e.gap1 // 5s between the 1st and 2nd
 			}
 			if wait > 0 {
-				log.Printf("automation: %s — esperando %s para la ronda %d/%d", tag, wait, round+2, e.rounds)
+				log.Printf("automation: %s — waiting %s for round %d/%d", tag, wait, round+2, e.rounds)
 				time.Sleep(wait)
 			}
 		}
 	}
-	// Reconciliación final: si en la ÚLTIMA ronda el book devolvió error pero la
-	// reserva cuajó, no hay ronda siguiente que lo detecte vía overlay. Volvemos a
-	// consultar una vez para confirmar antes de dar el disparo por fallido (evita el
-	// email de fallo falso y un reintento que reservaría dos veces).
+	// Final reconciliation: if on the LAST round book returned an error but the
+	// booking went through, there's no next round to detect it via overlay. We
+	// query once more to confirm before declaring the fire failed (avoids a false
+	// failure email and a retry that would double-book).
 	if !st.booked && st.attempts > 0 {
 		if classes, err := e.fetchDay(o.rule.UserID, o.date); err == nil {
 			if bookedMatch(findMatches(classes, o.rule)) != nil {
 				st.booked = true
-				log.Printf("automation: ✓ %s — RESERVADA (confirmada en reconciliación final, pese a error de la API)", tag)
+				log.Printf("automation: ✓ %s — BOOKED (confirmed in final reconciliation, despite the API error)", tag)
 				e.notifyBooked(o, st)
 			}
 		}
 	}
 	if !st.booked {
-		log.Printf("automation: %s — disparo terminado SIN reservar tras %d rondas (último motivo: %s)", tag, e.rounds, st.lastError)
+		log.Printf("automation: %s — fire finished WITHOUT booking after %d rounds (last reason: %s)", tag, e.rounds, st.lastError)
 	}
 }
 
-// untilNext devuelve cuánto dormir: hasta el próximo disparo, o maxIdle si está
-// más lejos (para refrescar la agenda y captar reglas nuevas sin tocar la red).
+// untilNext returns how long to sleep: until the next fire, or maxIdle if it's
+// farther away (to refresh the schedule and pick up new rules without touching
+// the network).
 func (e *Engine) untilNext(now time.Time, occs []occ) time.Duration {
 	var next time.Time
 	for _, o := range occs {
@@ -337,9 +339,9 @@ func (e *Engine) untilNext(now time.Time, occs []occ) time.Duration {
 	return sleep
 }
 
-// findMatches devuelve TODAS las instancias que casan con la regla. El Solarium
-// expone varias "camas" a la misma hora (cada una una clase reservable distinta),
-// así que una regla puede casar con más de una.
+// findMatches returns ALL instances matching the rule. The Solarium exposes
+// several "beds" at the same time (each a distinct bookable class), so a rule can
+// match more than one.
 func findMatches(classes []calendar.Class, r Rule) []*calendar.Class {
 	var out []*calendar.Class
 	for i := range classes {
@@ -351,8 +353,8 @@ func findMatches(classes []calendar.Class, r Rule) []*calendar.Class {
 	return out
 }
 
-// bookedMatch devuelve la primera instancia ya reservada por el socio, si la hay
-// (basta una: todas las camas comparten nombre+club+fecha+hora en el overlay).
+// bookedMatch returns the first instance already booked by the member, if any
+// (one is enough: all beds share name+club+date+time in the overlay).
 func bookedMatch(matches []*calendar.Class) *calendar.Class {
 	for _, c := range matches {
 		if c.Booked {
@@ -362,8 +364,8 @@ func bookedMatch(matches []*calendar.Class) *calendar.Class {
 	return nil
 }
 
-// bookableBeds filtra las instancias que el calendario marca reservables y con
-// ids válidos. El motor las prueba en orden hasta que el POST de reserva acepte.
+// bookableBeds filters the instances the calendar marks bookable and with valid
+// ids. The engine tries them in order until the booking POST accepts.
 func bookableBeds(matches []*calendar.Class) []*calendar.Class {
 	var out []*calendar.Class
 	for _, c := range matches {
@@ -374,7 +376,7 @@ func bookableBeds(matches []*calendar.Class) []*calendar.Class {
 	return out
 }
 
-// langOf resuelve el idioma del usuario (it/es/en) con fallback a Default.
+// langOf resolves the user's language (it/es/en) with fallback to Default.
 func (e *Engine) langOf(userID int64) i18n.Lang {
 	if e.lang == nil {
 		return i18n.Default
@@ -382,8 +384,8 @@ func (e *Engine) langOf(userID int64) i18n.Lang {
 	return i18n.Coerce(e.lang(userID))
 }
 
-// notifyBooked avisa al socio de una reserva conseguida (incluye los intentos si
-// los hubo: reserva directa, confirmación tras error de la API o reconciliación).
+// notifyBooked notifies the member of a successful booking (includes the attempt
+// count if any: direct booking, confirmation after an API error, or reconciliation).
 func (e *Engine) notifyBooked(o occ, st *occState) {
 	lang := e.langOf(o.rule.UserID)
 	body := i18n.T(lang, "email.booked.body", classLines(lang, o.rule.Name, o.rule.Club, o.start))
@@ -394,7 +396,7 @@ func (e *Engine) notifyBooked(o occ, st *occState) {
 	e.notify(o.rule.UserID, i18n.T(lang, "email.booked.subject", o.rule.Name), body)
 }
 
-// ---- estado ----
+// ---- state ----
 
 func (e *Engine) get(key string) *occState {
 	e.mu.Lock()

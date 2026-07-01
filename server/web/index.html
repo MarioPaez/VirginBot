@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
-<title>VirginBot · Calendario corsi</title>
+<title>VirginBot · Class calendar</title>
 <style>
   :root { --red:#e2231a; --green:#1faa59; --bg:#0f1115; --card:#1a1d24; --muted:#8b93a1; --line:#2a2e38; }
   * { box-sizing:border-box; }
@@ -64,7 +64,7 @@
   .login-card input:focus { border-color:var(--red); }
   .login-card .btn { padding:10px; font-size:15px; }
   .login-err { color:var(--red); font-size:13px; min-height:16px; }
-  /* ---- Automatizaciones (agenda semanal) ---- */
+  /* ---- Automations (weekly agenda) ---- */
   .autos-wrap { max-width:760px; margin:4px auto 0; padding:0 24px; }
   .autos-filters { display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin-bottom:6px; }
   .daygroup { margin-top:24px; }
@@ -102,7 +102,7 @@
   .linkbtn.danger:hover { color:var(--red); }
   .hint { max-width:760px; margin:24px auto 0; color:var(--muted); font-size:12.5px; line-height:1.55;
           padding:14px 24px 0; border-top:1px solid var(--line); }
-  /* ---- Listas (calendario / reservas) ---- */
+  /* ---- Lists (calendar / bookings) ---- */
   .list-wrap { max-width:760px; margin:0 auto; padding:0 24px; }
   .clist { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
   .crow { display:grid; grid-template-columns:22px 52px 1fr auto; align-items:center; gap:13px;
@@ -131,24 +131,24 @@
 <header>
   <div class="top">
     <img src="/logo.svg" class="logo" alt="VirginBot">
-    <h1>Virgin<span>Bot</span> <span class="tagline" data-i18n="header.tagline">· Calendario corsi</span></h1>
+    <h1>Virgin<span>Bot</span> <span class="tagline" data-i18n="header.tagline">· Class calendar</span></h1>
     <div class="meta" id="meta"></div>
     <select id="langSel" class="langsel" onchange="setLang(this.value)" aria-label="Lingua / Idioma / Language">
       <option value="it">IT</option><option value="es">ES</option><option value="en">EN</option>
     </select>
     <span class="user" id="user" data-i18n-title="header.session"></span>
-    <button class="logout" onclick="logout()" data-i18n="action.logout">Salir</button>
+    <button class="logout" onclick="logout()" data-i18n="action.logout">Log out</button>
   </div>
   <div class="tabs">
-    <button class="tab active" data-view="calendar" data-i18n="tab.calendar">Calendario</button>
-    <button class="tab" data-view="bookings" data-i18n="tab.bookings">Mis reservas</button>
-    <button class="tab" data-view="automations" data-i18n="tab.automations">Automatizaciones</button>
+    <button class="tab active" data-view="calendar" data-i18n="tab.calendar">Calendar</button>
+    <button class="tab" data-view="bookings" data-i18n="tab.bookings">My bookings</button>
+    <button class="tab" data-view="automations" data-i18n="tab.automations">Automations</button>
   </div>
 </header>
 
 <div class="controls" id="controls">
   <div class="chipgroup">
-    <span class="grouplabel" data-i18n="filter.class">Clase</span>
+    <span class="grouplabel" data-i18n="filter.class">Class</span>
     <div class="chips" id="classChips" data-multi="1"></div>
   </div>
   <div class="chipgroup">
@@ -157,17 +157,17 @@
   </div>
 </div>
 
-<main id="out"><div class="loading" data-i18n="loading.calendar">Preparando el calendario…</div></main>
+<main id="out"><div class="loading" data-i18n="loading.calendar">Preparing the calendar…</div></main>
 <div id="toast"></div>
 
 <div id="login" class="login-overlay" style="display:none">
   <form class="login-card" onsubmit="doLogin(event)">
     <img src="/logo.svg" class="logo-lg" alt="VirginBot">
     <h2>Virgin<span>Bot</span></h2>
-    <p class="login-sub" data-i18n="login.sub">Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.</p>
+    <p class="login-sub" data-i18n="login.sub">Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.</p>
     <input id="li-email" type="email" data-i18n-ph="login.email" placeholder="email" autocomplete="username" required>
-    <input id="li-pass" type="password" data-i18n-ph="login.pass" placeholder="contraseña" autocomplete="current-password" required>
-    <button type="submit" class="btn btn-book" id="li-btn" data-i18n="login.submit">Entrar</button>
+    <input id="li-pass" type="password" data-i18n-ph="login.pass" placeholder="password" autocomplete="current-password" required>
+    <button type="submit" class="btn btn-book" id="li-btn" data-i18n="login.submit">Sign in</button>
     <div id="li-err" class="login-err"></div>
   </form>
 </div>
@@ -266,7 +266,7 @@ let lang = (() => {
   return "en";
 })();
 
-// t traduce una clave (con fallback a inglés) y sustituye %s/%d por los args.
+// t translates a key (falling back to English) and replaces %s/%d with the args.
 function t(key, ...args) {
   let s = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
   let i = 0;
@@ -275,7 +275,7 @@ function t(key, ...args) {
 
 const loc = () => LOCALE[lang] || "en-GB";
 
-// applyI18n vuelca el catálogo en los elementos estáticos marcados con data-i18n.
+// applyI18n applies the catalog to the static elements marked with data-i18n.
 function applyI18n() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-i18n]").forEach(el => el.innerHTML = t(el.dataset.i18n));
@@ -289,24 +289,24 @@ function updateMeta() {
   if (all.length) $("#meta").textContent = t("meta.count", all.length, new Set(all.map(c => c.date)).size);
 }
 
-// setLang cambia el idioma: persiste (local + servidor para los emails) y repinta.
+// setLang changes the language: persists (local + server for the emails) and repaints.
 async function setLang(v) {
   if (!LANGS.includes(v)) return;
   lang = v;
   localStorage.setItem("lang", v);
-  fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (también para emails)
+  fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for emails)
   applyI18n();
-  if ($("#login").style.display !== "none") return; // solo login visible: nada que repintar
+  if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
   if (state.view === "calendar") { populateClubChips(all); populateClassChips(all); }
   render();
 }
 
-// weekdayName devuelve el nombre del día (0=Domingo) en el idioma activo.
+// weekdayName returns the weekday name (0=Sunday) in the active language.
 function weekdayName(wd) {
   return capitalize(new Date(2024, 0, 7 + wd).toLocaleDateString(loc(), { weekday: "long" }));
 }
 
-// Categoría amplia de una clase, para los filtros (varias clases → una categoría).
+// Broad category of a class, for the filters (several classes → one category).
 const CATEGORIES = ["Calisthenics", "Pilates", "Solarium", "Full Body", "TRX", "Cycle"];
 function classCategory(name) {
   const n = name.toLowerCase();
@@ -337,8 +337,8 @@ async function load() {
   await loadCalendar(token);
 }
 
-// loadCalendar trae todo el calendario en UNA llamada (vapi acepta rango). El
-// navegador lo guarda en memoria (`all`); al cambiar de pestaña no se re-pide.
+// loadCalendar fetches the whole calendar in ONE call (vapi accepts a range). The
+// browser keeps it in memory (`all`); switching tabs doesn't re-request it.
 async function loadCalendar(token) {
   all = [];
   $("#out").innerHTML = `<div class="loading">${t("loading.calendar2")}</div>`;
@@ -361,7 +361,7 @@ function populateClubChips(list) {
     clubs.map(c => `<button class="chip${state.club===c?" active":""}" data-val="${c}">${c.replace(/^Milano\s+/i,"")}</button>`).join("");
 }
 
-// Chips de clase (multi-select acumulativo): solo las categorías presentes.
+// Class chips (cumulative multi-select): only the categories present.
 function populateClassChips(list) {
   const present = new Set(list.map(c => classCategory(c.name)));
   const cats = CATEGORIES.filter(c => present.has(c)).concat([...present].filter(c => !CATEGORIES.includes(c)));
@@ -380,9 +380,9 @@ function render() {
   renderClasses(rows, false);
 }
 
-// loadBookings lee las reservas persistidas en la BD (consistentes con Virgin,
-// sin días pasados). Un escaneo en 2º plano del servidor las mantiene al día; si
-// la primera lectura llega vacía (escaneo aún en curso tras arrancar), reintenta.
+// loadBookings reads the bookings persisted in the DB (consistent with Virgin,
+// without past days). A background scan on the server keeps them up to date; if
+// the first read comes back empty (scan still running after startup), it retries.
 async function loadBookings(attempt = 0) {
   if (attempt === 0) $("#out").innerHTML = `<div class="loading">${t("loading.bookings")}</div>`;
   bookings = (await (await fetch(`/api/bookings`)).json()) || [];
@@ -436,8 +436,8 @@ function renderClasses(rows, isBookings) {
      </div>`).join("") + `</div>`;
 }
 
-// loadAutomations recarga las reglas (con su próximo intento ya recalculado,
-// saltando las lecciones que ya tienes reservadas).
+// loadAutomations reloads the rules (with their next attempt already recomputed,
+// skipping the classes you already have booked).
 async function loadAutomations() {
   try { autos = (await (await fetch("/api/automations")).json()) || []; } catch (e) {}
   if (state.view === "automations") renderAutomations();
@@ -448,7 +448,7 @@ const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
 const fmtItDateTime = iso => capitalize(new Date(iso).toLocaleString(loc(), { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }));
 const fmtItDate = ymd => capitalize(new Date(ymd + "T00:00").toLocaleDateString(loc(), { weekday: "long", day: "numeric", month: "long" }));
 
-// Color + icono por categoría, para el acento visual de cada tarjeta.
+// Color + icon per category, for each card's visual accent.
 const CAT_STYLE = {
   Calisthenics: { color: "#e2231a", icon: "🏋️" },
   Pilates:      { color: "#b07cff", icon: "🧘" },
@@ -459,8 +459,8 @@ const CAT_STYLE = {
 };
 const catStyle = name => CAT_STYLE[classCategory(name)] || { color: "#8b93a1", icon: "🏃" };
 
-// relWhen formatea un instante ISO en relativo y corto: "hoy 18:15", "mañana
-// 18:15", "Martedì 18:15" (esta semana) o "1 lug 18:15" (más lejos).
+// relWhen formats an ISO instant as a short relative string: "today 18:15",
+// "tomorrow 18:15", "Martedì 18:15" (this week) or "1 Jul 18:15" (farther out).
 function relWhen(iso) {
   const d = new Date(iso), now = new Date();
   const day0 = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
@@ -575,7 +575,7 @@ async function toggleAuto(c, on) {
       const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)})).json();
       toast(res.booked ? t("toast.bookedbang") : t("toast.autoadded"));
       autos = (await (await fetch(`/api/automations`)).json()) || [];
-      if (res.booked) { load(); return; } // recarga el calendario para reflejar la reserva
+      if (res.booked) { load(); return; } // reload the calendar to reflect the booking
       render();
     } else {
       const rule = ruleFor(c);
@@ -598,7 +598,7 @@ document.querySelectorAll(".chips").forEach(group => {
   group.addEventListener("click", e => {
     const chip = e.target.closest(".chip"); if (!chip) return;
     if (group.dataset.multi) {
-      // Multi-select acumulativo (Clase): "Todas" limpia; cada categoría alterna.
+      // Cumulative multi-select (Class): "All" clears; each category toggles.
       const val = chip.dataset.val;
       if (val === "") state.cats.clear();
       else if (state.cats.has(val)) state.cats.delete(val);
@@ -628,12 +628,12 @@ function showLogin() { $("#login").style.display = "flex"; }
 function showApp()   { $("#login").style.display = "none"; }
 
 async function init() {
-  applyI18n(); // pinta el login/cabecera en el idioma detectado mientras consultamos /api/me
+  applyI18n(); // paint the login/header in the detected language while we query /api/me
   try {
     const me = await (await fetch("/api/me")).json();
     if (me.loggedIn) {
-      // El servidor manda: si tiene idioma guardado, lo usamos (coherente con los
-      // emails); si no, persistimos el detectado en el navegador.
+      // The server wins: if it has a saved language we use it (consistent with the
+      // emails); otherwise we persist the one detected in the browser.
       if (LANGS.includes(me.lang)) { lang = me.lang; localStorage.setItem("lang", lang); }
       else fetch(`/api/lang?lang=${lang}`, { method: "PATCH" }).catch(() => {});
       applyI18n();

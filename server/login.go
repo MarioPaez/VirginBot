@@ -19,20 +19,20 @@ import (
 
 const (
 	sessionCookie = "va_session"
-	sessionTTL    = 30 * 24 * time.Hour // los tokens caducan a los 30 días
+	sessionTTL    = 30 * 24 * time.Hour // tokens expire after 30 days
 
-	loginWindow      = 5 * time.Minute // ventana del rate-limit de login
-	loginMaxAttempts = 8               // intentos permitidos por IP y ventana
+	loginWindow      = 5 * time.Minute // login rate-limit window
+	loginMaxAttempts = 8               // attempts allowed per IP and window
 )
 
-// ctxKey es el tipo de las claves de contexto de este paquete.
+// ctxKey is the type of this package's context keys.
 type ctxKey int
 
 const ctxUserID ctxKey = iota
 
-// sessions persiste los tokens de sesión del FE en SQLite (atados a un usuario),
-// así el login sobrevive a los reinicios de la aplicación. Incluye un rate-limit
-// en memoria de los intentos de login por IP.
+// sessions persists the FE session tokens in SQLite (tied to a user), so login
+// survives application restarts. It includes an in-memory rate limit of login
+// attempts per IP.
 type sessions struct {
 	db *sql.DB
 
@@ -49,7 +49,7 @@ func newSessions(db *sql.DB) *sessions {
 	return &sessions{db: db, attempts: map[string]*loginAttempts{}}
 }
 
-// allow aplica el rate-limit: como máximo loginMaxAttempts por IP cada loginWindow.
+// allow applies the rate limit: at most loginMaxAttempts per IP every loginWindow.
 func (s *sessions) allow(ip string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -69,12 +69,13 @@ func (s *sessions) create(userID int64) string {
 	tok := hex.EncodeToString(b)
 	if _, err := s.db.Exec(`INSERT INTO sessions (token, user_id, created) VALUES (?, ?, ?)`,
 		tok, userID, time.Now().Format(time.RFC3339)); err != nil {
-		log.Printf("crear sesión: %v", err)
+		log.Printf("create session: %v", err)
 	}
 	return tok
 }
 
-// valid devuelve el usuario asociado al token, o ok=false si no existe o caducó.
+// valid returns the user associated with the token, or ok=false if it doesn't
+// exist or has expired.
 func (s *sessions) valid(tok string) (int64, bool) {
 	if tok == "" {
 		return 0, false
@@ -85,7 +86,7 @@ func (s *sessions) valid(tok string) (int64, bool) {
 		return 0, false
 	}
 	if t, err := time.Parse(time.RFC3339, created); err == nil && time.Since(t) > sessionTTL {
-		s.destroy(tok) // caducada: la limpiamos
+		s.destroy(tok) // expired: clean it up
 		return 0, false
 	}
 	return userID, true
@@ -95,12 +96,12 @@ func (s *sessions) destroy(tok string) {
 	s.db.Exec(`DELETE FROM sessions WHERE token = ?`, tok)
 }
 
-// handleLogin valida las credenciales contra Virgin, materializa el usuario y
-// abre sesión.
+// handleLogin validates the credentials against Virgin, materializes the user and
+// opens a session.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.sess.allow(clientIP(r)) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		writeJSON(w, map[string]any{"ok": false, "error": "demasiados intentos, espera unos minutos"})
+		writeJSON(w, map[string]any{"ok": false, "error": "too many attempts, wait a few minutes"})
 		return
 	}
 	var req struct {
@@ -108,20 +109,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Pass  string `json:"pass"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "petición inválida", http.StatusBadRequest)
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 	if !emailAllowed(req.Email) {
 		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]any{"ok": false, "error": "esta cuenta no está autorizada en este servidor"})
+		writeJSON(w, map[string]any{"ok": false, "error": "this account isn't allowed on this server"})
 		return
 	}
 	userID, err := s.auth.Login(req.Email, req.Pass)
 	if err != nil {
-		// Distingue credenciales mal de problemas de red/bloqueo del sitio.
-		msg, code := "credenciales inválidas", http.StatusUnauthorized
-		if !strings.Contains(err.Error(), "rechazado") {
-			msg, code = "no se pudo conectar con Virgin Active, reinténtalo en un momento", http.StatusBadGateway
+		// Distinguish bad credentials from network/site-block problems.
+		msg, code := "invalid credentials", http.StatusUnauthorized
+		if !strings.Contains(err.Error(), "rejected") {
+			msg, code = "couldn't connect to Virgin Active, try again in a moment", http.StatusBadGateway
 		}
 		w.WriteHeader(code)
 		writeJSON(w, map[string]any{"ok": false, "error": msg})
@@ -132,17 +133,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r),
 	})
-	// Detecta el idioma del navegador la primera vez (no pisa una elección previa).
+	// Detect the browser language the first time (doesn't override a prior choice).
 	if s.accounts.Lang(userID) == "" {
 		s.accounts.SetLang(userID, string(i18n.Normalize(r.Header.Get("Accept-Language"))))
 	}
-	s.InvalidateUser(userID) // recargar el calendario con la sesión autenticada
+	s.InvalidateUser(userID) // reload the calendar with the authenticated session
 	writeJSON(w, map[string]any{"ok": true, "email": req.Email})
 }
 
-// emailAllowed comprueba la allowlist opcional VA_ALLOWED_EMAILS (lista separada
-// por comas). Si la variable está vacía, el registro es abierto (cualquier cuenta
-// Virgin válida). Útil para restringir un despliegue público a ti y a tus amigos.
+// emailAllowed checks the optional VA_ALLOWED_EMAILS allowlist (comma-separated
+// list). If the variable is empty, registration is open (any valid Virgin
+// account). Handy to restrict a public deployment to you and your friends.
 func emailAllowed(email string) bool {
 	raw := strings.TrimSpace(os.Getenv("VA_ALLOWED_EMAILS"))
 	if raw == "" {
@@ -157,8 +158,8 @@ func emailAllowed(email string) bool {
 	return false
 }
 
-// clientIP obtiene la IP del cliente, respetando X-Forwarded-For tras un proxy
-// que termina TLS (hosting). Toma el primer salto de la cadena.
+// clientIP obtains the client IP, honoring X-Forwarded-For behind a TLS-
+// terminating proxy (hosting). Takes the first hop of the chain.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {
@@ -172,9 +173,9 @@ func clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// isHTTPS detecta si la petición llega por HTTPS (directo o tras un proxy que
-// termina TLS, como en el hosting). Permite marcar la cookie como Secure en
-// producción sin romper el desarrollo local en http://localhost.
+// isHTTPS detects whether the request arrives over HTTPS (directly or behind a
+// TLS-terminating proxy, as in hosting). Lets us mark the cookie as Secure in
+// production without breaking local development on http://localhost.
 func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
@@ -187,7 +188,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// handleMe informa del estado de sesión y del email del usuario logueado.
+// handleMe reports the session status and the logged-in user's email.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.userOf(r)
 	email, lang := "", ""
@@ -203,8 +204,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleSetLang fija el idioma preferido del usuario (it/es/en). Lo usa el
-// selector del frontend; afecta a la UI y a los emails.
+// handleSetLang sets the user's preferred language (it/es/en). Used by the
+// frontend selector; affects the UI and the emails.
 func (s *Server) handleSetLang(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	lang := string(i18n.Coerce(r.URL.Query().Get("lang")))
@@ -215,7 +216,7 @@ func (s *Server) handleSetLang(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "lang": lang})
 }
 
-// userOf devuelve el usuario de la cookie de sesión.
+// userOf returns the user from the session cookie.
 func (s *Server) userOf(r *http.Request) (int64, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
@@ -224,7 +225,7 @@ func (s *Server) userOf(r *http.Request) (int64, bool) {
 	return s.sess.valid(c.Value)
 }
 
-// userIDFrom recupera el usuario inyectado por requireSession en el contexto.
+// userIDFrom retrieves the user injected by requireSession into the context.
 func userIDFrom(r *http.Request) int64 {
 	if v, ok := r.Context().Value(ctxUserID).(int64); ok {
 		return v
@@ -232,14 +233,14 @@ func userIDFrom(r *http.Request) int64 {
 	return 0
 }
 
-// requireSession protege un handler: 401 si no hay sesión válida; si la hay,
-// inyecta el userID en el contexto de la petición.
+// requireSession guards a handler: 401 if there's no valid session; if there is,
+// injects the userID into the request context.
 func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := s.userOf(r)
 		if !ok {
 			w.WriteHeader(http.StatusUnauthorized)
-			writeJSON(w, map[string]any{"error": "no autenticado"})
+			writeJSON(w, map[string]any{"error": "not authenticated"})
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxUserID, userID)))

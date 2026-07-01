@@ -7,8 +7,8 @@ import (
 	"github.com/MarioPaez/VirginBot/i18n"
 )
 
-// nextOccurrence devuelve la próxima fecha/hora (en loc) que casa con el día de
-// la semana y la hora de la regla, a partir de `from` (incluido si aún no pasó).
+// nextOccurrence returns the next date/time (in loc) matching the rule's weekday
+// and time, starting from `from` (included if it hasn't passed yet).
 func nextOccurrence(r Rule, from time.Time, loc *time.Location) (time.Time, bool) {
 	for d := 0; d <= 7; d++ {
 		day := from.AddDate(0, 0, d)
@@ -27,7 +27,7 @@ func nextOccurrence(r Rule, from time.Time, loc *time.Location) (time.Time, bool
 	return time.Time{}, false
 }
 
-// windowDaysOf devuelve los días de antelación con que abre el plazo de la regla.
+// windowDaysOf returns how many days ahead the rule's booking window opens.
 func windowDaysOf(r Rule) int {
 	if r.OpensDaysBefore > 0 {
 		return r.OpensDaysBefore
@@ -35,8 +35,8 @@ func windowDaysOf(r Rule) int {
 	return WindowDays(r.Name)
 }
 
-// Summary devuelve un bloque legible (en el idioma dado) con la info relevante
-// de una regla: clase, club, próxima ocurrencia exacta y cuándo abre el plazo.
+// Summary returns a readable block (in the given language) with a rule's key
+// info: class, club, exact next occurrence and when the window opens.
 func (r Rule) Summary(lang i18n.Lang, loc *time.Location) string {
 	lines := []string{
 		i18n.T(lang, "summary.class", r.Name),
@@ -55,7 +55,7 @@ func (r Rule) Summary(lang i18n.Lang, loc *time.Location) string {
 	return strings.Join(lines, "\n")
 }
 
-// classLines formatea las líneas clase/club/día de una ocurrencia concreta.
+// classLines formats the class/club/day lines of a specific occurrence.
 func classLines(lang i18n.Lang, name, club string, when time.Time) string {
 	return i18n.T(lang, "block.class", name, club, i18n.FormatDateTime(lang, when))
 }

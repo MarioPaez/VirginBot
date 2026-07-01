@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-// loadDotEnv carga variables de un fichero .env al entorno del proceso, sin
-// pisar las que ya estén definidas (el entorno real tiene prioridad). No falla
-// si el fichero no existe: en producción las variables se inyectan de otra forma.
+// loadDotEnv loads variables from a .env file into the process environment,
+// without overriding those already set (the real environment takes precedence).
+// It does not fail if the file is missing: in production the variables are
+// injected some other way.
 func loadDotEnv(path string) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -29,7 +30,7 @@ func loadDotEnv(path string) {
 		}
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
-		// Quita comillas envolventes ('...' o "...").
+		// Strip wrapping quotes ('...' or "...").
 		if len(val) >= 2 {
 			if (val[0] == '\'' && val[len(val)-1] == '\'') ||
 				(val[0] == '"' && val[len(val)-1] == '"') {
@@ -40,7 +41,7 @@ func loadDotEnv(path string) {
 			continue
 		}
 		if _, exists := os.LookupEnv(key); exists {
-			continue // el entorno real manda
+			continue // the real environment wins
 		}
 		os.Setenv(key, val)
 	}

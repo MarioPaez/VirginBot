@@ -30,11 +30,11 @@ const (
 	maxDays     = 30
 )
 
-// Server sirve el calendario (en vivo, vía vapi), reservas y automatizaciones.
-// Todo el estado de usuario se aísla por user_id. El calendario ya NO se cachea
-// en BD: vapi acepta rango y todo el calendario son 2 llamadas; el navegador lo
-// guarda en memoria. Solo persisten en BD: usuarios, sesiones, automatizaciones
-// y la tabla bookings (reconciliada desde vapi).
+// Server serves the calendar (live, via vapi), bookings and automations. All user
+// state is isolated by user_id. The calendar is NO longer cached in the DB: vapi
+// accepts a range and the whole calendar is 2 calls; the browser keeps it in
+// memory. Only these persist in the DB: users, sessions, automations and the
+// bookings table (reconciled from vapi).
 type Server struct {
 	db       *sql.DB
 	auth     *Auth
@@ -47,7 +47,7 @@ type Server struct {
 	sender   notification.Sender
 
 	mu      sync.Mutex
-	fetchIn map[string]bool // reconciliaciones de reservas en curso, clave "bookings|userID"
+	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
 }
 
 func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func(calendar.Class) bool, store *automation.Store, sender notification.Sender) *Server {
@@ -71,16 +71,16 @@ func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func
 	return s
 }
 
-// warm precarga las reservas de los usuarios registrados (para que nextAttempt y
-// el overlay estén al día desde el arranque).
+// warm preloads the registered users' bookings (so nextAttempt and the overlay
+// are up to date from startup).
 func (s *Server) warm() {
 	for _, uid := range s.accounts.ListUserIDs() {
 		s.fetchBookings(uid)
 	}
 }
 
-// dailyRefreshLoop purga reservas pasadas y refresca las de cada usuario a las
-// 00:00 (Italia).
+// dailyRefreshLoop purges past bookings and refreshes each user's at 00:00
+// (Italy).
 func (s *Server) dailyRefreshLoop() {
 	for {
 		now := time.Now().In(s.loc)
@@ -111,7 +111,7 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
-// dates devuelve las próximas `days` fechas (zona horaria de Italia).
+// dates returns the next `days` dates (Italy timezone).
 func (s *Server) dates(days int) []string {
 	now := time.Now().In(s.loc)
 	out := make([]string, days)
@@ -123,25 +123,25 @@ func (s *Server) dates(days int) []string {
 
 func (s *Server) today() string { return time.Now().In(s.loc).Format("2006-01-02") }
 
-// ---- calendario ----
+// ---- calendar ----
 
 type calendarDay struct {
 	Date    string           `json:"date"`
 	Classes []calendar.Class `json:"classes"`
 }
 
-// handleCalendar devuelve TODO el calendario (los próximos `days` días) en una
-// respuesta: clases curadas, deduplicadas y con el overlay de reservas. Pocas
-// llamadas a vapi; el navegador lo cachea en memoria.
+// handleCalendar returns the WHOLE calendar (the next `days` days) in one
+// response: curated, deduplicated classes with the bookings overlay. Few vapi
+// calls; the browser caches it in memory.
 func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	days := clampDays(r.URL.Query().Get("days"))
 	now := time.Now().In(s.loc)
 
-	s.fetchBookings(userID) // reservas frescas para el overlay
+	s.fetchBookings(userID) // fresh bookings for the overlay
 	classes, err := s.freshClasses(userID, now, now.AddDate(0, 0, days-1))
 	if err != nil {
-		http.Error(w, "no se pudo cargar el calendario: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "couldn't load the calendar: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
@@ -153,7 +153,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	for _, d := range s.dates(days) {
 		cs := byDay[d]
 		if len(cs) == 0 {
-			continue // sin clases (agenda no publicada aún): no lo mostramos, como la app
+			continue // no classes (schedule not published yet): we don't show it, like the app
 		}
 		sort.Slice(cs, func(i, j int) bool {
 			if cs[i].Start != cs[j].Start {
@@ -166,9 +166,9 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"days": out})
 }
 
-// downloadClasses descarga (vapi) y cura (filtro keep) las clases de todos los
-// clubes en el rango, SIN deduplicar ni marcar reservas: cada llamante decide si
-// colapsa las "camas" del Solarium (web) o las conserva todas (motor).
+// downloadClasses downloads (vapi) and curates (keep filter) the classes of all
+// clubs in the range, WITHOUT deduplicating or marking bookings: each caller
+// decides whether to collapse the Solarium "beds" (web) or keep them all (engine).
 func (s *Server) downloadClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
 	var classes []calendar.Class
 	err := s.auth.Do(userID, func(client *vapi.Client) error {
@@ -188,8 +188,8 @@ func (s *Server) downloadClasses(userID int64, start, end time.Time) ([]calendar
 	return s.curate(classes), nil
 }
 
-// freshClasses prepara el calendario para la web: deduplica (una fila por
-// club+clase+hora) y marca las reservadas (overlay).
+// freshClasses prepares the calendar for the web: deduplicates (one row per
+// club+class+time) and marks the booked ones (overlay).
 func (s *Server) freshClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
 	classes, err := s.downloadClasses(userID, start, end)
 	if err != nil {
@@ -198,12 +198,12 @@ func (s *Server) freshClasses(userID int64, start, end time.Time) ([]calendar.Cl
 	return s.overlayBooked(userID, dedupe(classes)), nil
 }
 
-// dedupe colapsa las instancias de una misma clase (mismo club, nombre, fecha y
-// hora) en una sola fila —p. ej. el Solarium tiene muchas "camas", cada una una
-// clase reservable distinta— prefiriendo la instancia más reservable.
+// dedupe collapses the instances of the same class (same club, name, date and
+// time) into a single row —e.g. the Solarium has many "beds", each a distinct
+// bookable class— preferring the most bookable instance.
 func dedupe(classes []calendar.Class) []calendar.Class {
 	rank := map[string]int{"bookable": 3, "waitlist": 2, "unavailable": 1}
-	best := map[string]int{} // clave -> índice en out
+	best := map[string]int{} // key -> index in out
 	var out []calendar.Class
 	for _, c := range classes {
 		k := c.Date + "|" + c.Club + "|" + c.Name + "|" + c.Start
@@ -219,8 +219,8 @@ func dedupe(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// overlayBooked marca como reservadas (con los ids reales para cancelar) las
-// clases que el usuario ya tiene en la tabla bookings.
+// overlayBooked marks as booked (with the real ids to cancel) the classes the
+// user already has in the bookings table.
 func (s *Server) overlayBooked(userID int64, classes []calendar.Class) []calendar.Class {
 	for i := range classes {
 		c := &classes[i]
@@ -233,7 +233,7 @@ func (s *Server) overlayBooked(userID int64, classes []calendar.Class) []calenda
 	return classes
 }
 
-// futureOnly descarta las clases cuya fecha+hora ya pasó.
+// futureOnly drops classes whose date+time has already passed.
 func (s *Server) futureOnly(classes []calendar.Class) []calendar.Class {
 	now := time.Now().In(s.loc)
 	out := make([]calendar.Class, 0, len(classes))
@@ -246,9 +246,9 @@ func (s *Server) futureOnly(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// FreshDayFor obtiene un día en vivo para el motor, SIN deduplicar: el motor
-// necesita ver TODAS las "camas" del Solarium (cada una una clase reservable
-// distinta) para ir probándolas hasta que una acepte la reserva.
+// FreshDayFor fetches a live day for the engine, WITHOUT deduplicating: the
+// engine needs to see ALL the Solarium "beds" (each a distinct bookable class) to
+// try them until one accepts the booking.
 func (s *Server) FreshDayFor(userID int64, date string) ([]calendar.Class, error) {
 	day, err := time.ParseInLocation("2006-01-02", date, s.loc)
 	if err != nil {
@@ -261,7 +261,7 @@ func (s *Server) FreshDayFor(userID int64, date string) ([]calendar.Class, error
 	return s.overlayBooked(userID, classes), nil
 }
 
-// ---- reservas (tabla, reconciliada desde vapi) ----
+// ---- bookings (table, reconciled from vapi) ----
 
 func (s *Server) handleBookings(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
@@ -276,7 +276,7 @@ func (s *Server) handleBookingsRefresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.listBookings(userID))
 }
 
-// triggerBookings reconcilia las reservas en 2º plano (una sola vez a la vez).
+// triggerBookings reconciles the bookings in the background (only one at a time).
 func (s *Server) triggerBookings(userID int64) {
 	key := fmt.Sprintf("bookings|%d", userID)
 	s.mu.Lock()
@@ -292,7 +292,7 @@ func (s *Server) triggerBookings(userID int64) {
 	}()
 }
 
-// fetchBookings reconcilia la tabla bookings del usuario con vapi (una llamada).
+// fetchBookings reconciles the user's bookings table with vapi (one call).
 func (s *Server) fetchBookings(userID int64) {
 	now := time.Now().In(s.loc)
 	end := now.AddDate(0, 0, defaultDays)
@@ -303,7 +303,7 @@ func (s *Server) fetchBookings(userID int64) {
 		return err
 	})
 	if err != nil {
-		log.Printf("reservas u%d fallido: %v", userID, err)
+		log.Printf("bookings u%d failed: %v", userID, err)
 		return
 	}
 	s.reconcileBookings(userID, now.Format("2006-01-02"), end.Format("2006-01-02"), booked)
@@ -312,12 +312,12 @@ func (s *Server) fetchBookings(userID int64) {
 func (s *Server) reconcileBookings(userID int64, start, end string, booked []calendar.Class) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		log.Printf("reconciliar reservas u%d: %v", userID, err)
+		log.Printf("reconcile bookings u%d: %v", userID, err)
 		return
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`DELETE FROM bookings WHERE user_id = ? AND date >= ? AND date <= ?`, userID, start, end); err != nil {
-		log.Printf("reconciliar (borrar) u%d: %v", userID, err)
+		log.Printf("reconcile (delete) u%d: %v", userID, err)
 		return
 	}
 	now := time.Now().Format(time.RFC3339)
@@ -327,7 +327,7 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(user_id, name, club, date, start) DO NOTHING`,
 			userID, c.Name, c.Club, c.Date, c.Start, c.End, c.Instructor, c.ClubID, c.ClassID, c.SessionID, c.BookingID, now); err != nil {
-			log.Printf("reconciliar (insertar) u%d: %v", userID, err)
+			log.Printf("reconcile (insert) u%d: %v", userID, err)
 			return
 		}
 	}
@@ -343,13 +343,13 @@ func (s *Server) purgePastBookings() {
 	s.db.Exec(`DELETE FROM bookings WHERE date < ?`, s.today())
 }
 
-// listBookings devuelve las reservas futuras del usuario con forma de Class.
+// listBookings returns the user's future bookings as Class values.
 func (s *Server) listBookings(userID int64) []calendar.Class {
 	rows, err := s.db.Query(
 		`SELECT name, club, date, start, end_time, instructor, club_id, class_id, session_id, booking_id
 		 FROM bookings WHERE user_id = ? AND date >= ? ORDER BY date, start`, userID, s.today())
 	if err != nil {
-		log.Printf("listar reservas u%d: %v", userID, err)
+		log.Printf("list bookings u%d: %v", userID, err)
 		return []calendar.Class{}
 	}
 	defer rows.Close()
@@ -366,7 +366,7 @@ func (s *Server) listBookings(userID int64) []calendar.Class {
 	return s.futureOnly(out)
 }
 
-// bookingInfo devuelve los ids de la reserva del socio para una ocurrencia.
+// bookingInfo returns the member's booking ids for an occurrence.
 func (s *Server) bookingInfo(userID int64, name, club, date, start string) (clubID, classID, sessionID, bookingID int, ok bool) {
 	err := s.db.QueryRow(
 		`SELECT club_id, class_id, session_id, booking_id FROM bookings WHERE user_id=? AND name=? AND club=? AND date=? AND start=?`,
@@ -379,7 +379,7 @@ func (s *Server) isBooked(userID int64, name, club, date, start string) bool {
 	return ok
 }
 
-// ---- reservas (acciones) ----
+// ---- bookings (actions) ----
 
 type bookRequest struct {
 	ClubID    int    `json:"clubId"`
@@ -400,10 +400,10 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Re-resolvemos los ids contra el calendario FRESCO: los que manda el FE pueden
-	// estar desfasados (el navegador cachea el calendario y Virgin reprograma la
-	// sesión → nuevo sessionId), lo que provoca TOO_EARLY/TOO_LATE_TO_BOOK al
-	// reservar una ocurrencia que ya no es la de ese día.
+	// Re-resolve the ids against the FRESH calendar: the ones the FE sends may be
+	// stale (the browser caches the calendar and Virgin reschedules the session →
+	// new sessionId), which causes TOO_EARLY/TOO_LATE_TO_BOOK when booking an
+	// occurrence that's no longer the one for that day.
 	classes, err := s.FreshDayFor(userID, req.Date)
 	if err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
@@ -411,11 +411,11 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	beds := bookableMatches(classes, req.Name, req.Club, req.Start)
 	if len(beds) == 0 {
-		writeJSON(w, map[string]any{"ok": false, "error": "ya no hay plaza reservable; recarga el calendario"})
+		writeJSON(w, map[string]any{"ok": false, "error": "no bookable slot anymore; reload the calendar"})
 		return
 	}
-	// Probamos cada instancia hasta que el POST acepte (Solarium: varias "camas";
-	// clase normal: una sola).
+	// Try each instance until the POST accepts (Solarium: several "beds"; normal
+	// class: only one).
 	var bookErr error
 	for _, c := range beds {
 		bookErr = s.auth.Do(userID, func(client *vapi.Client) error {
@@ -433,9 +433,9 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// bookableMatches devuelve las instancias reservables (status bookable, ids
-// válidos) que casan con name+club+start del día ya descargado. Re-resolver así
-// evita reservar un sessionId desfasado que mandó el FE desde su caché.
+// bookableMatches returns the bookable instances (status bookable, valid ids)
+// matching name+club+start of the already-downloaded day. Re-resolving this way
+// avoids booking a stale sessionId the FE sent from its cache.
 func bookableMatches(classes []calendar.Class, name, club, start string) []calendar.Class {
 	var out []calendar.Class
 	for _, c := range classes {
@@ -471,13 +471,13 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 func decodeBook(w http.ResponseWriter, r *http.Request) (bookRequest, bool) {
 	var req bookRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "petición inválida", http.StatusBadRequest)
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return req, false
 	}
 	return req, true
 }
 
-// ---- automatizaciones ----
+// ---- automations ----
 
 func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
@@ -487,7 +487,7 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		out := make([]automationView, 0, len(rules))
 		for _, rule := range rules {
 			v := automationView{Rule: rule}
-			if rule.Enabled { // las pausadas no se ejecutan: no calculamos próximo intento
+			if rule.Enabled { // paused rules don't run: we don't compute the next attempt
 				if date, at, ok := s.nextAttempt(userID, rule); ok {
 					v.NextClass = date
 					v.NextAttempt = at.Format(time.RFC3339)
@@ -503,7 +503,7 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		}
 		wd, ok := weekdayOf(req.Date)
 		if !ok {
-			http.Error(w, "fecha inválida", http.StatusBadRequest)
+			http.Error(w, "invalid date", http.StatusBadRequest)
 			return
 		}
 		rule, err := s.store.Add(userID, req.Name, req.Club, wd, req.Start)
@@ -528,7 +528,7 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPatch:
 		id := r.URL.Query().Get("id")
 		if _, found := s.store.Get(userID, id); !found {
-			http.Error(w, "automatización no encontrada", http.StatusNotFound)
+			http.Error(w, "automation not found", http.StatusNotFound)
 			return
 		}
 		enabled := r.URL.Query().Get("enabled") == "1"
@@ -552,7 +552,7 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	default:
-		http.Error(w, "método no permitido", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -576,8 +576,8 @@ type automationView struct {
 	NextAttempt string `json:"nextAttempt"`
 }
 
-// nextAttempt calcula la próxima ocurrencia NO reservada y el instante del
-// próximo intento (siguiente disparo a la hora de la clase).
+// nextAttempt computes the next UNBOOKED occurrence and the instant of the next
+// attempt (the next fire at the class time).
 func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, attempt time.Time, ok bool) {
 	now := time.Now().In(s.loc)
 	w := r.OpensDaysBefore
@@ -611,7 +611,7 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 
 // ---- helpers ----
 
-// langOf devuelve el idioma del usuario (it/es/en), con fallback a Default.
+// langOf returns the user's language (it/es/en), with fallback to Default.
 func (s *Server) langOf(userID int64) i18n.Lang {
 	return i18n.Coerce(s.accounts.Lang(userID))
 }
@@ -620,7 +620,7 @@ func (s *Server) emailUser(userID int64, subject, body string) {
 	to := s.auth.Email(userID)
 	go func() {
 		if err := s.sender.Send(to, subject, body); err != nil {
-			log.Printf("aviso email fallido (u%d): %v", userID, err)
+			log.Printf("email notification failed (u%d): %v", userID, err)
 		}
 	}()
 }
@@ -638,8 +638,8 @@ func (s *Server) curate(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// InvalidateUser reconcilia las reservas tras reservar/cancelar (el FE recarga el
-// calendario, que se sirve en vivo).
+// InvalidateUser reconciles the bookings after booking/cancelling (the FE reloads
+// the calendar, which is served live).
 func (s *Server) InvalidateUser(userID int64) {
 	s.fetchBookings(userID)
 }
@@ -666,11 +666,11 @@ func weekdayOf(date string) (int, bool) {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("error escribiendo JSON: %v", err)
+		log.Printf("error writing JSON: %v", err)
 	}
 }
 
-// noCache evita que el navegador sirva una versión vieja del FE embebido.
+// noCache prevents the browser from serving a stale version of the embedded FE.
 func noCache(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

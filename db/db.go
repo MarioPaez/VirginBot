@@ -1,6 +1,6 @@
-// Package db abre la base de datos SQLite y crea el esquema. No conoce tipos de
-// dominio: cada almacén (account, automation, server) hace su propio SQL sobre
-// el *sql.DB compartido.
+// Package db opens the SQLite database and creates the schema. It knows no domain
+// types: each store (account, automation, server) runs its own SQL on the shared
+// *sql.DB.
 package db
 
 import (
@@ -10,8 +10,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schema es el esquema actual (multi-usuario). En instalaciones nuevas crea todo
-// directamente; en bases existentes, las tablas legadas se ajustan en migrate().
+// schema is the current (multi-user) schema. On fresh installs it creates
+// everything directly; on existing databases, legacy tables are adjusted in
+// migrate().
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,14 +55,14 @@ CREATE TABLE IF NOT EXISTS bookings (
 );
 `
 
-// Open abre (o crea) la base de datos en `path` y aplica el esquema/migración.
+// Open opens (or creates) the database at `path` and applies the schema/migration.
 func Open(path string) (*sql.DB, error) {
 	d, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	// SQLite: serializamos el acceso (1 conexión) para evitar "database is
-	// locked"; el volumen de tráfico es bajo.
+	// SQLite: serialize access (1 connection) to avoid "database is locked"; the
+	// traffic volume is low.
 	d.SetMaxOpenConns(1)
 	for _, pragma := range []string{
 		"PRAGMA journal_mode = WAL",
@@ -72,39 +73,39 @@ func Open(path string) (*sql.DB, error) {
 		}
 	}
 	if err := migrate(d); err != nil {
-		return nil, fmt.Errorf("migrar esquema: %w", err)
+		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 	return d, nil
 }
 
-// migrate lleva una base mono-usuario al esquema multi-usuario de forma
-// idempotente. En instalaciones nuevas, las tablas se crean ya en su forma final
-// y los pasos de migración no hacen nada.
+// migrate brings a single-user database to the multi-user schema idempotently. On
+// fresh installs the tables are created in their final form and the migration
+// steps do nothing.
 func migrate(d *sql.DB) error {
-	// 1) Tablas que necesitan cambio de PK y NO se pueden alterar in situ.
-	//    Se resuelven ANTES de crear el esquema nuevo.
+	// 1) Tables that need a PK change and can't be altered in place. Resolved
+	//    BEFORE creating the new schema.
 	if err := rebuildAutomations(d); err != nil {
 		return err
 	}
 	if err := dropLegacyBookings(d); err != nil {
 		return err
 	}
-	// La caché de calendario en BD ya no se usa (el calendario se sirve en vivo
-	// desde vapi); se elimina si existía de versiones anteriores.
+	// The DB calendar cache is no longer used (the calendar is served live from
+	// vapi); drop it if it existed from older versions.
 	if _, err := d.Exec(`DROP TABLE IF EXISTS day_cache`); err != nil {
 		return err
 	}
 
-	// 2) Crear/asegurar todas las tablas en su forma final.
+	// 2) Create/ensure all tables in their final form.
 	if _, err := d.Exec(schema); err != nil {
-		return fmt.Errorf("crear esquema: %w", err)
+		return fmt.Errorf("create schema: %w", err)
 	}
 
-	// 3) Columnas que sí se pueden añadir in situ a tablas legadas.
+	// 3) Columns that can be added in place to legacy tables.
 	if err := ensureColumn(d, "sessions", "user_id", "INTEGER NOT NULL DEFAULT 1"); err != nil {
 		return err
 	}
-	// Migración a vapi: ids necesarios para reservar/cancelar vía la API móvil.
+	// vapi migration: ids needed to book/cancel via the mobile API.
 	for _, col := range []string{"club_id", "class_id", "session_id"} {
 		if err := ensureColumn(d, "bookings", col, "INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
@@ -113,35 +114,34 @@ func migrate(d *sql.DB) error {
 	if err := ensureColumn(d, "bookings", "instructor", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	// i18n: idioma preferido del usuario (vacío = aún sin detectar).
+	// i18n: user's preferred language (empty = not detected yet).
 	if err := ensureColumn(d, "users", "lang", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
-	// 4) Migrar el único usuario legado (credentials.id=1) a la tabla users.
+	// 4) Migrate the single legacy user (credentials.id=1) into the users table.
 	if err := migrateLegacyUser(d); err != nil {
 		return err
 	}
 	return nil
 }
 
-// rebuildAutomations reconstruye la tabla automations con PK (user_id, id) si
-// aún tiene la forma antigua (sin user_id), conservando las reglas existentes
-// como del usuario 1.
+// rebuildAutomations rebuilds the automations table with PK (user_id, id) if it
+// still has the old shape (no user_id), keeping existing rules as user 1's.
 func rebuildAutomations(d *sql.DB) error {
 	exists, err := tableExists(d, "automations")
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return nil // instalación nueva: el esquema la creará con la forma final
+		return nil // fresh install: the schema will create it in its final form
 	}
 	has, err := hasColumn(d, "automations", "user_id")
 	if err != nil {
 		return err
 	}
 	if has {
-		return nil // ya está en la forma nueva
+		return nil // already in the new shape
 	}
 	stmts := []string{
 		`CREATE TABLE automations_new (
@@ -159,8 +159,8 @@ func rebuildAutomations(d *sql.DB) error {
 	return execAll(d, stmts)
 }
 
-// dropLegacyBookings borra la tabla bookings si tiene la forma antigua (columna
-// `center`, sin los ids de vapi). Es caché: se repuebla desde la API móvil.
+// dropLegacyBookings drops the bookings table if it has the old shape (a `center`
+// column, without the vapi ids). It's a cache: repopulated from the mobile API.
 func dropLegacyBookings(d *sql.DB) error {
 	exists, err := tableExists(d, "bookings")
 	if err != nil || !exists {
@@ -171,14 +171,14 @@ func dropLegacyBookings(d *sql.DB) error {
 		return err
 	}
 	if !has {
-		return nil // ya está en la forma nueva
+		return nil // already in the new shape
 	}
 	_, err = d.Exec(`DROP TABLE bookings`)
 	return err
 }
 
-// migrateLegacyUser copia la fila única de la tabla legada credentials (id=1) a
-// users, si existe y users está vacía.
+// migrateLegacyUser copies the single row of the legacy credentials table (id=1)
+// into users, if it exists and users is empty.
 func migrateLegacyUser(d *sql.DB) error {
 	exists, err := tableExists(d, "credentials")
 	if err != nil || !exists {
@@ -206,7 +206,7 @@ func migrateLegacyUser(d *sql.DB) error {
 	return err
 }
 
-// ---- helpers de introspección ----
+// ---- introspection helpers ----
 
 func tableExists(d *sql.DB, name string) (bool, error) {
 	var n int

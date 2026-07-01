@@ -11,20 +11,20 @@ import (
 	"time"
 )
 
-// Store guarda las cuentas de Virgin Active de los usuarios en SQLite, con la
-// contraseña CIFRADA (AES-256-GCM). Hay que poder recuperarla en claro para
-// re-loguear de forma desatendida (la sesión de Virgin caduca a las ~2h).
+// Store keeps users' Virgin Active accounts in SQLite, with the password
+// ENCRYPTED (AES-256-GCM). We must be able to recover it in clear text to
+// re-login unattended (the Virgin session expires after ~2h).
 //
-// La identidad de un usuario es su email de Virgin (único). El cifrado es
-// stateless: cada lectura descifra desde la BD, así no mantenemos secretos en
-// memoria más de lo necesario.
+// A user's identity is their (unique) Virgin email. Encryption is stateless:
+// every read decrypts from the DB, so we don't keep secrets in memory longer
+// than necessary.
 type Store struct {
 	db  *sql.DB
 	gcm cipher.AEAD
 }
 
-// NewStore abre el almacén sobre la BD. `secret` deriva la clave de cifrado;
-// debe ser estable entre reinicios (variable de entorno APP_SECRET).
+// NewStore opens the store on the DB. `secret` derives the encryption key; it
+// must be stable across restarts (APP_SECRET environment variable).
 func NewStore(db *sql.DB, secret string) (*Store, error) {
 	key := sha256.Sum256([]byte(secret))
 	block, err := aes.NewCipher(key[:])
@@ -38,8 +38,8 @@ func NewStore(db *sql.DB, secret string) (*Store, error) {
 	return &Store{db: db, gcm: gcm}, nil
 }
 
-// Upsert crea o actualiza un usuario por email (cifrando la contraseña) y
-// devuelve su id.
+// Upsert creates or updates a user by email (encrypting the password) and
+// returns their id.
 func (s *Store) Upsert(email, pass string) (int64, error) {
 	enc, err := s.encrypt(pass)
 	if err != nil {
@@ -50,7 +50,7 @@ func (s *Store) Upsert(email, pass string) (int64, error) {
 		 ON CONFLICT(email) DO UPDATE SET pass = excluded.pass`,
 		email, enc, time.Now().Format(time.RFC3339))
 	if err != nil {
-		return 0, fmt.Errorf("guardar usuario: %w", err)
+		return 0, fmt.Errorf("save user: %w", err)
 	}
 	var id int64
 	if err := s.db.QueryRow(`SELECT id FROM users WHERE email = ?`, email).Scan(&id); err != nil {
@@ -59,7 +59,7 @@ func (s *Store) Upsert(email, pass string) (int64, error) {
 	return id, nil
 }
 
-// Get devuelve las credenciales (email + contraseña en claro) de un usuario.
+// Get returns a user's credentials (email + clear-text password).
 func (s *Store) Get(userID int64) (email, pass string, ok bool) {
 	var enc []byte
 	if err := s.db.QueryRow(`SELECT email, pass FROM users WHERE id = ?`, userID).Scan(&email, &enc); err != nil {
@@ -72,7 +72,7 @@ func (s *Store) Get(userID int64) (email, pass string, ok bool) {
 	return email, pt, true
 }
 
-// Email devuelve el email de un usuario (o "").
+// Email returns a user's email (or "").
 func (s *Store) Email(userID int64) string {
 	var email string
 	if err := s.db.QueryRow(`SELECT email FROM users WHERE id = ?`, userID).Scan(&email); err != nil {
@@ -81,7 +81,7 @@ func (s *Store) Email(userID int64) string {
 	return email
 }
 
-// Lang devuelve el idioma preferido del usuario (o "" si aún no se ha fijado).
+// Lang returns the user's preferred language (or "" if not set yet).
 func (s *Store) Lang(userID int64) string {
 	var lang string
 	if err := s.db.QueryRow(`SELECT lang FROM users WHERE id = ?`, userID).Scan(&lang); err != nil {
@@ -90,13 +90,13 @@ func (s *Store) Lang(userID int64) string {
 	return lang
 }
 
-// SetLang fija el idioma preferido del usuario (código it/es/en).
+// SetLang sets the user's preferred language (it/es/en code).
 func (s *Store) SetLang(userID int64, lang string) error {
 	_, err := s.db.Exec(`UPDATE users SET lang = ? WHERE id = ?`, lang, userID)
 	return err
 }
 
-// ListUserIDs devuelve los ids de todos los usuarios registrados.
+// ListUserIDs returns the ids of all registered users.
 func (s *Store) ListUserIDs() []int64 {
 	rows, err := s.db.Query(`SELECT id FROM users ORDER BY id`)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *Store) ListUserIDs() []int64 {
 	return out
 }
 
-// ---- cifrado ----
+// ---- encryption ----
 
 func (s *Store) encrypt(pass string) ([]byte, error) {
 	nonce := make([]byte, s.gcm.NonceSize())
@@ -126,7 +126,7 @@ func (s *Store) encrypt(pass string) ([]byte, error) {
 func (s *Store) decrypt(enc []byte) (string, error) {
 	ns := s.gcm.NonceSize()
 	if len(enc) < ns {
-		return "", fmt.Errorf("dato cifrado inválido")
+		return "", fmt.Errorf("invalid ciphertext")
 	}
 	pt, err := s.gcm.Open(nil, enc[:ns], enc[ns:], nil)
 	if err != nil {
