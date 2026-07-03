@@ -12,7 +12,7 @@ Pure Go · single static binary · no CGO · embedded web UI · it/es/en
 
 ## What is this?
 
-Popular classes at my gym (Calisthenics, Solarium) fill up the moment their booking window opens — often 7 days in advance, at the exact class time, while I'm asleep or at work. **VirginBot books them for me automatically.**
+Popular classes at my gym (Calisthenics, Solarium) fill up the moment their booking window opens — often 8 days in advance, at the exact class time, while I'm asleep or at work. **VirginBot books them for me automatically.**
 
 You pick the weekly classes you care about, and the bot wakes up at precisely the right instant, grabs your spot the second it's available, and sends you an email with the outcome. It's a small, self-hosted web app you log into with your own Virgin Active account.
 
@@ -43,7 +43,7 @@ You pick the weekly classes you care about, and the bot wakes up at precisely th
 ## Features
 
 - 📅 **Live calendar** of the classes you care about (per logged-in user), one-click booking and cancellation.
-- 🤖 **Automations** — mark a weekly class as *auto* and the bot books it **precisely when the window opens** (e.g. 7 days before for Calisthenics, at the exact class time), retrying a few times in case the slot is enabled a few seconds late. Recurring every week; pause and resume any rule.
+- 🤖 **Automations** — mark a weekly class as *auto* and the bot books it **precisely when the window opens** (8 days before — 2 for the Solarium — at the exact class time), retrying a few times in case the slot is enabled a few seconds late. Recurring every week; pause and resume any rule.
 - 📖 **"My bookings"** synced from the real source of truth (your bookings match your phone).
 - ✉️ **Email notifications** — automation added/removed, booking succeeded/failed.
 - 🌍 **Multilingual** — UI and emails in **Italian, Spanish and English**, auto-detected from the browser with a manual switcher.
@@ -66,6 +66,7 @@ Requirements: **Go 1.26+**.
    APP_SECRET=<openssl rand -hex 32>          # encrypts users' passwords — required
    VA_API_KEY=<static x-api-key from the app> # required
    VA_ALLOWED_EMAILS=you@example.com          # allowlist (empty = open registration)
+   VA_ADMIN_EMAIL=you@example.com             # optional: unlocks the admin tab (view/manage every user's automations)
    # SMTP (optional, for email notifications)
    SMTP_HOST=...  SMTP_PORT=587  SMTP_USER=...  SMTP_PASS=...  SMTP_FROM=<verified sender>
    # Optional: seed the first user without the login screen

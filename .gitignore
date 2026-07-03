@@ -3,6 +3,7 @@
 
 # Entorno
 .env
+deploy.sh
 automations.json
 credentials.enc
 virginbot.db

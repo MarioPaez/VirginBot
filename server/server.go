@@ -102,10 +102,14 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/calendar", s.requireSession(s.handleCalendar))
 	mux.HandleFunc("/api/bookings", s.requireSession(s.handleBookings))
 	mux.HandleFunc("/api/bookings/refresh", s.requireSession(s.handleBookingsRefresh))
+	mux.HandleFunc("/api/bookings/shared", s.requireSession(s.handleSharedBookings))
 	mux.HandleFunc("/api/book", s.requireSession(s.handleBook))
 	mux.HandleFunc("/api/unbook", s.requireSession(s.handleUnbook))
 	mux.HandleFunc("/api/automations", s.requireSession(s.handleAutomations))
 	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
+	mux.HandleFunc("/api/admin/users", s.requireAdmin(s.handleAdminUsers))
+	mux.HandleFunc("/api/admin/automations", s.requireAdmin(s.handleAdminAutomations))
+	mux.HandleFunc("/api/admin/bookings", s.requireAdmin(s.handleAdminBookings))
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("/", noCache(http.FileServer(http.FS(static))))
 	return mux
@@ -409,7 +413,7 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	beds := bookableMatches(classes, req.Name, req.Club, req.Start)
+	beds := bookableMatches(classes, req.Name, req.Club, req.Start, req.Date)
 	if len(beds) == 0 {
 		writeJSON(w, map[string]any{"ok": false, "error": "no bookable slot anymore; reload the calendar"})
 		return
@@ -434,12 +438,14 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 }
 
 // bookableMatches returns the bookable instances (status bookable, valid ids)
-// matching name+club+start of the already-downloaded day. Re-resolving this way
-// avoids booking a stale sessionId the FE sent from its cache.
-func bookableMatches(classes []calendar.Class, name, club, start string) []calendar.Class {
+// matching name+club+date+start of the already-downloaded day. Re-resolving this
+// way avoids booking a stale sessionId the FE sent from its cache. The date check
+// guards against vapi bleeding a neighboring day's session into a single-day
+// query (same name/club/start every day, e.g. the Solarium).
+func bookableMatches(classes []calendar.Class, name, club, start, date string) []calendar.Class {
 	var out []calendar.Class
 	for _, c := range classes {
-		if strings.EqualFold(c.Name, name) && strings.EqualFold(c.Club, club) && c.Start == start &&
+		if strings.EqualFold(c.Name, name) && strings.EqualFold(c.Club, club) && c.Start == start && c.Date == date &&
 			c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0 {
 			out = append(out, c)
 		}

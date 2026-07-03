@@ -102,13 +102,33 @@
   .linkbtn.danger:hover { color:var(--red); }
   .hint { max-width:760px; margin:24px auto 0; color:var(--muted); font-size:12.5px; line-height:1.55;
           padding:14px 24px 0; border-top:1px solid var(--line); }
+  /* ---- Admin ---- */
+  .admin-wrap { max-width:960px; margin:4px auto 0; padding:0 24px; }
+  .admin-section h3 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+                       margin:28px 0 10px; }
+  .admin-section:first-child h3 { margin-top:0; }
+  .atable { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line);
+            border-radius:14px; overflow:hidden; font-size:13px; }
+  .atable th, .atable td { padding:9px 14px; text-align:left; border-top:1px solid var(--line); }
+  .atable th { color:var(--muted); font-weight:600; font-size:12px; border-top:none; }
+  .atable tr:first-child td { border-top:none; }
+  .atable .owner { color:var(--muted); }
+
   /* ---- Lists (calendar / bookings) ---- */
   .list-wrap { max-width:760px; margin:0 auto; padding:0 24px; }
-  .clist { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  /* Sin overflow:hidden: recortar bloques de miles de px con esquinas redondeadas
+     dispara un bug de rasterizado en iOS Safari (franjas negras); redondeamos la
+     primera/última fila en su lugar. */
+  .clist { background:var(--card); border:1px solid var(--line); border-radius:14px; }
+  /* Rasterizado por islas: el navegador se salta lo que está fuera de pantalla.
+     Evita las franjas negras de Safari en páginas muy largas (~300 clases). */
+  .daygroup { content-visibility:auto; contain-intrinsic-size:auto 900px; }
   .crow { display:grid; grid-template-columns:22px 52px 1fr auto; align-items:center; gap:13px;
           padding:10px 16px 10px 13px; border-top:1px solid var(--line); border-left:3px solid transparent;
           transition:background .12s; }
-  .crow:first-child { border-top:none; }
+  .crow:first-child { border-top:none; border-radius:13px 13px 0 0; }
+  .crow:last-child { border-radius:0 0 13px 13px; }
+  .crow:only-child { border-radius:13px; }
   .crow:hover { background:#1e222b; }
   .crow.booked { background:rgba(31,170,89,.06); }
   .crow .cicon { font-size:16px; line-height:1; text-align:center; }
@@ -119,11 +139,34 @@
   .crow .cname { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .crow .csub { color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .crow .cact { display:flex; align-items:center; gap:12px; justify-self:end; }
+  .crow .cwho { gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   @media (max-width:560px) {
-    .crow { grid-template-columns:20px 48px 1fr; row-gap:8px; }
+    header { padding:10px 14px 0; }
+    .top { gap:8px; flex-wrap:nowrap; }  /* una sola fila: sin la franja vacía del Salir */
+    h1 .tagline { display:none; }  /* redundante: el título ya lo dice */
+    .meta { display:none; }        /* el contador de clases no cabe */
+    .user { display:none; }        /* el email no cabe; estar dentro ya implica sesión */
+    .langsel { margin-left:auto; } /* empuja idioma+Salir a la derecha */
+    /* 5 pestañas no caben: carrusel horizontal sin barra visible.
+       OJO: sin -webkit-overflow-scrolling:touch — está deprecada y en Safari
+       (no en los WKWebView tipo Chrome iOS) provoca franjas negras sin pintar. */
+    .tabs { overflow-x:auto; scrollbar-width:none; margin-top:8px; }
+    .tabs::-webkit-scrollbar { display:none; }
+    .tab { padding:10px 11px; white-space:nowrap; flex:none; }
+    .controls { padding:10px 14px 4px; gap:8px; }
+    .daygroup { margin-top:16px; }
+    main { padding:0 14px 48px; }
+    .list-wrap, .autos-wrap, .admin-wrap { padding:0; }
+    .hint { padding:14px 0 0; }
+    .btn { padding:8px 14px; }     /* área táctil cómoda */
+    .crow { grid-template-columns:20px 48px 1fr; row-gap:8px; padding:10px 12px 10px 10px; }
     .crow .cact { grid-column:2 / -1; justify-self:start; }
     .auto-grid { grid-template-columns:1fr; }
     .autos-filters { gap:12px; }
+    /* tablas admin: scroll horizontal dentro de su sección */
+    .admin-section { overflow-x:auto; }
+    .atable { min-width:560px; }
+    .login-card input { font-size:16px; } /* <16px dispara el auto-zoom de iOS al enfocar */
   }
 </style>
 </head>
@@ -142,14 +185,20 @@
   <div class="tabs">
     <button class="tab active" data-view="calendar" data-i18n="tab.calendar">Calendar</button>
     <button class="tab" data-view="bookings" data-i18n="tab.bookings">My bookings</button>
+    <button class="tab" data-view="shared" data-i18n="tab.shared">Who's going</button>
     <button class="tab" data-view="automations" data-i18n="tab.automations">Automations</button>
+    <button class="tab" data-view="admin" id="adminTab" style="display:none" data-i18n="tab.admin">Admin</button>
   </div>
 </header>
 
 <div class="controls" id="controls">
   <div class="chipgroup">
     <span class="grouplabel" data-i18n="filter.class">Class</span>
-    <div class="chips" id="classChips" data-multi="1"></div>
+    <div class="chips" id="classChips" data-multi="1" data-key="cats"></div>
+  </div>
+  <div class="chipgroup">
+    <span class="grouplabel" data-i18n="filter.day">Day</span>
+    <div class="chips" id="dayChips" data-multi="1" data-key="days"></div>
   </div>
   <div class="chipgroup">
     <span class="grouplabel" data-i18n="filter.club">Club</span>
@@ -165,8 +214,8 @@
     <img src="/logo.svg" class="logo-lg" alt="VirginBot">
     <h2>Virgin<span>Bot</span></h2>
     <p class="login-sub" data-i18n="login.sub">Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.</p>
-    <input id="li-email" type="email" data-i18n-ph="login.email" placeholder="email" autocomplete="username" required>
-    <input id="li-pass" type="password" data-i18n-ph="login.pass" placeholder="password" autocomplete="current-password" required>
+    <input id="li-email" name="username" type="email" data-i18n-ph="login.email" placeholder="email" autocomplete="username" required>
+    <input id="li-pass" name="password" type="password" data-i18n-ph="login.pass" placeholder="password" autocomplete="current-password" required>
     <button type="submit" class="btn btn-book" id="li-btn" data-i18n="login.submit">Sign in</button>
     <div id="li-err" class="login-err"></div>
   </form>
@@ -175,8 +224,8 @@
 <script>
 const DAYS = 10;
 const $ = s => document.querySelector(s);
-let all = [], autos = [], bookings = [], loadToken = 0;
-const state = { cats: new Set(), club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
+let all = [], autos = [], bookings = [], shared = [], myEmail = "", loadToken = 0;
+const state = { cats: new Set(), days: new Set(), club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
 
 // ---- i18n ----
 const LANGS = ["it", "es", "en"];
@@ -184,8 +233,13 @@ const LOCALE = { it: "it-IT", es: "es-ES", en: "en-GB" };
 const I18N = {
   it: {
     "header.tagline": "· Calendario corsi", "header.session": "Sessione attiva", "action.logout": "Esci",
-    "tab.calendar": "Calendario", "tab.bookings": "Le mie prenotazioni", "tab.automations": "Automazioni",
-    "filter.class": "Lezione", "filter.club": "Club", "filter.status": "Stato",
+    "tab.calendar": "Calendario", "tab.bookings": "Le mie prenotazioni", "tab.shared": "Chi viene", "tab.automations": "Automazioni", "tab.admin": "Admin",
+    "loading.shared": "Caricamento delle prenotazioni di tutti…", "empty.shared": "Nessuna prenotazione nei prossimi giorni.",
+    "shared.you": "Tu", "shared.hint": "Prenotazioni di tutti gli utenti nei prossimi giorni: se una lezione mostra più nomi, ci andate insieme.",
+    "admin.automations": "Automazioni di tutti", "admin.bookings": "Prenotazioni di tutti (sola lettura)",
+    "admin.owner": "Utente", "admin.class": "Lezione", "admin.club": "Club", "admin.when": "Quando", "admin.status": "Stato", "admin.actions": "Azioni",
+    "admin.empty.automations": "Nessuna automazione registrata.", "admin.empty.bookings": "Nessuna prenotazione nei prossimi giorni.",
+    "filter.class": "Lezione", "filter.day": "Giorno", "filter.club": "Club", "filter.status": "Stato",
     "all.m": "Tutti", "all.f": "Tutte", "status.active": "Attive", "status.paused": "In pausa",
     "loading.calendar": "Preparazione del calendario…", "loading.calendar2": "Caricamento calendario…",
     "loading.bookings": "Caricamento prenotazioni…", "error.calendar": "Impossibile caricare il calendario. Riprova.",
@@ -199,7 +253,7 @@ const I18N = {
     "auto.next": "Prossimo tentativo <b>%s</b>", "auto.willbook": "Prenoterà la lezione del <b>%s</b>",
     "auto.pill.active": "Attiva", "auto.pill.paused": "In pausa",
     "auto.activate": "Attiva", "auto.pause": "Pausa", "auto.remove": "Rimuovi",
-    "auto.hint": "Ogni settimana provo a prenotare all'ora della lezione, da quando si aprono le prenotazioni (calisthenics 7 giorni prima, solarium 2) fino a 24 h prima. Metti in pausa senza perdere la configurazione e riattiva quando vuoi.",
+    "auto.hint": "Ogni settimana provo a prenotare all'ora della lezione, da quando si aprono le prenotazioni (8 giorni prima, solarium 2) fino a 24 h prima. Metti in pausa senza perdere la configurazione e riattiva quando vuoi.",
     "toast.activated": "Attivata ✓", "toast.paused": "In pausa", "toast.booked": "Prenotata ✓", "toast.cancelled": "Annullata ✓",
     "toast.error": "Errore", "toast.bookedbang": "Prenotata! ✓", "toast.autoadded": "Automazione aggiunta ✓", "toast.autoremoved": "Automazione rimossa",
     "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
@@ -208,8 +262,13 @@ const I18N = {
   },
   es: {
     "header.tagline": "· Calendario de clases", "header.session": "Sesión iniciada", "action.logout": "Salir",
-    "tab.calendar": "Calendario", "tab.bookings": "Mis reservas", "tab.automations": "Automatizaciones",
-    "filter.class": "Clase", "filter.club": "Club", "filter.status": "Estado",
+    "tab.calendar": "Calendario", "tab.bookings": "Mis reservas", "tab.shared": "Quién va", "tab.automations": "Automatizaciones", "tab.admin": "Admin",
+    "loading.shared": "Cargando las reservas de todos…", "empty.shared": "No hay reservas en los próximos días.",
+    "shared.you": "Tú", "shared.hint": "Reservas de todos los usuarios en los próximos días: si una clase muestra varios nombres, vais juntos.",
+    "admin.automations": "Automatizaciones de todos", "admin.bookings": "Reservas de todos (solo lectura)",
+    "admin.owner": "Usuario", "admin.class": "Clase", "admin.club": "Club", "admin.when": "Cuándo", "admin.status": "Estado", "admin.actions": "Acciones",
+    "admin.empty.automations": "No hay automatizaciones registradas.", "admin.empty.bookings": "No hay reservas en los próximos días.",
+    "filter.class": "Clase", "filter.day": "Día", "filter.club": "Club", "filter.status": "Estado",
     "all.m": "Todos", "all.f": "Todas", "status.active": "Activas", "status.paused": "Pausadas",
     "loading.calendar": "Preparando el calendario…", "loading.calendar2": "Cargando calendario…",
     "loading.bookings": "Cargando tus reservas…", "error.calendar": "No se pudo cargar el calendario. Reintenta.",
@@ -223,7 +282,7 @@ const I18N = {
     "auto.next": "Próximo intento <b>%s</b>", "auto.willbook": "Reserva la clase del <b>%s</b>",
     "auto.pill.active": "Activa", "auto.pill.paused": "Pausada",
     "auto.activate": "Activar", "auto.pause": "Pausar", "auto.remove": "Quitar",
-    "auto.hint": "Cada semana intento reservar a la hora de la clase, desde que abre el plazo (calistenia 7 días antes, solarium 2) hasta 24 h antes. Pausa una sin perder su configuración y actívala cuando quieras.",
+    "auto.hint": "Cada semana intento reservar a la hora de la clase, desde que abre el plazo (8 días antes, solarium 2) hasta 24 h antes. Pausa una sin perder su configuración y actívala cuando quieras.",
     "toast.activated": "Activada ✓", "toast.paused": "Pausada", "toast.booked": "Reservada ✓", "toast.cancelled": "Cancelada ✓",
     "toast.error": "Error", "toast.bookedbang": "¡Reservada! ✓", "toast.autoadded": "Automatización añadida ✓", "toast.autoremoved": "Automatización quitada",
     "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
@@ -232,8 +291,13 @@ const I18N = {
   },
   en: {
     "header.tagline": "· Class calendar", "header.session": "Signed in", "action.logout": "Log out",
-    "tab.calendar": "Calendar", "tab.bookings": "My bookings", "tab.automations": "Automations",
-    "filter.class": "Class", "filter.club": "Club", "filter.status": "Status",
+    "tab.calendar": "Calendar", "tab.bookings": "My bookings", "tab.shared": "Who's going", "tab.automations": "Automations", "tab.admin": "Admin",
+    "loading.shared": "Loading everyone's bookings…", "empty.shared": "No bookings in the coming days.",
+    "shared.you": "You", "shared.hint": "Everyone's bookings for the coming days: if a class shows several names, you're going together.",
+    "admin.automations": "Everyone's automations", "admin.bookings": "Everyone's bookings (read-only)",
+    "admin.owner": "User", "admin.class": "Class", "admin.club": "Club", "admin.when": "When", "admin.status": "Status", "admin.actions": "Actions",
+    "admin.empty.automations": "No automations registered.", "admin.empty.bookings": "No bookings in the coming days.",
+    "filter.class": "Class", "filter.day": "Day", "filter.club": "Club", "filter.status": "Status",
     "all.m": "All", "all.f": "All", "status.active": "Active", "status.paused": "Paused",
     "loading.calendar": "Preparing the calendar…", "loading.calendar2": "Loading the calendar…",
     "loading.bookings": "Loading your bookings…", "error.calendar": "Couldn't load the calendar. Try again.",
@@ -247,7 +311,7 @@ const I18N = {
     "auto.next": "Next attempt <b>%s</b>", "auto.willbook": "Will book the class on <b>%s</b>",
     "auto.pill.active": "Active", "auto.pill.paused": "Paused",
     "auto.activate": "Activate", "auto.pause": "Pause", "auto.remove": "Remove",
-    "auto.hint": "Every week I try to book at class time, from when booking opens (calisthenics 7 days before, solarium 2) until 24h before. Pause one without losing its setup and turn it back on whenever you want.",
+    "auto.hint": "Every week I try to book at class time, from when booking opens (8 days before, solarium 2) until 24h before. Pause one without losing its setup and turn it back on whenever you want.",
     "toast.activated": "Activated ✓", "toast.paused": "Paused", "toast.booked": "Booked ✓", "toast.cancelled": "Cancelled ✓",
     "toast.error": "Error", "toast.bookedbang": "Booked! ✓", "toast.autoadded": "Automation added ✓", "toast.autoremoved": "Automation removed",
     "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
@@ -297,7 +361,7 @@ async function setLang(v) {
   fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for emails)
   applyI18n();
   if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
-  if (state.view === "calendar") { populateClubChips(all); populateClassChips(all); }
+  populateClubChips(all); populateClassChips(all); populateDayChips(all); // localized labels
   render();
 }
 
@@ -305,6 +369,7 @@ async function setLang(v) {
 function weekdayName(wd) {
   return capitalize(new Date(2024, 0, 7 + wd).toLocaleDateString(loc(), { weekday: "long" }));
 }
+const weekdayShort = wd => capitalize(new Date(2024, 0, 7 + wd).toLocaleDateString(loc(), { weekday: "short" }));
 
 // Broad category of a class, for the filters (several classes → one category).
 const CATEGORIES = ["Calisthenics", "Pilates", "Solarium", "Full Body", "TRX", "Cycle"];
@@ -351,6 +416,7 @@ async function loadCalendar(token) {
   $("#meta").textContent = t("meta.count", all.length, (days || []).length);
   populateClubChips(all);
   populateClassChips(all);
+  populateDayChips(all);
   if (state.view === "calendar") render();
 }
 
@@ -370,12 +436,24 @@ function populateClassChips(list) {
     cats.map(c => `<button class="chip${state.cats.has(c)?" active":""}" data-val="${c}">${c}</button>`).join("");
 }
 
+// Weekday chips (cumulative multi-select): only the days present, Monday first.
+function populateDayChips(list) {
+  const present = new Set(list.map(c => weekdayOf(c.date)));
+  const days = [...present].sort((a, b) => ordWeekday(a) - ordWeekday(b));
+  $("#dayChips").innerHTML =
+    `<button class="chip${state.days.size===0?" active":""}" data-val="">${t("all.m")}</button>` +
+    days.map(d => `<button class="chip${state.days.has(String(d))?" active":""}" data-val="${d}">${weekdayShort(d)}</button>`).join("");
+}
+
 function render() {
   $("#controls").style.display = state.view === "calendar" ? "flex" : "none";
   if (state.view === "automations") return renderAutomations();
   if (state.view === "bookings") return renderClasses(bookings, true);
+  if (state.view === "shared") return renderShared();
+  if (state.view === "admin") return renderAdmin();
   const rows = all.filter(c =>
     (!state.cats.size || state.cats.has(classCategory(c.name))) &&
+    (!state.days.size || state.days.has(String(weekdayOf(c.date)))) &&
     (!state.club || c.club === state.club));
   renderClasses(rows, false);
 }
@@ -392,6 +470,50 @@ async function loadBookings(attempt = 0) {
     return;
   }
   renderClasses(bookings, true);
+}
+
+// ---- shared bookings (who's going) ----
+
+// loadShared reads everyone's upcoming bookings grouped by class occurrence,
+// to see who you'll share a class with.
+async function loadShared() {
+  $("#out").innerHTML = `<div class="loading">${t("loading.shared")}</div>`;
+  try { shared = (await (await fetch("/api/bookings/shared")).json()) || []; } catch (e) { shared = []; }
+  if (state.view === "shared") renderShared();
+}
+
+const displayName = email => capitalize(String(email).split("@")[0]);
+
+function sharedRow(c) {
+  const st = catStyle(c.name);
+  const mine = c.users.includes(myEmail);
+  const pills = c.users.map(u => u === myEmail
+    ? `<span class="pill active">${t("shared.you")}</span>`
+    : `<span class="pill off">${displayName(u)}</span>`).join("");
+  return `<div class="crow${mine ? " booked" : ""}" style="border-left-color:${st.color}">
+    <div class="cicon">${st.icon}</div>
+    <div class="ctime"><div class="s">${c.start}</div><div class="e">${c.end}</div></div>
+    <div class="cmain">
+      <div class="cname">${c.name}</div>
+      <div class="csub">${c.club}${c.instructor ? ` · ${c.instructor}` : ""}</div>
+    </div>
+    <div class="cact cwho">${pills}</div>
+  </div>`;
+}
+
+function renderShared() {
+  if (!shared.length) {
+    $("#out").innerHTML = `<div class="empty">${t("empty.shared")}</div>`;
+    return;
+  }
+  const byDay = {};
+  for (const c of shared) (byDay[c.date] ??= []).push(c);
+  $("#out").innerHTML = `<div class="list-wrap">` + Object.keys(byDay).sort().map(date =>
+    `<div class="daygroup">
+       <div class="daygroup-head"><span class="dow">${fmtItDate(date)}</span><span class="rule"></span><span class="count">${byDay[date].length}</span></div>
+       <div class="clist">${byDay[date].map(sharedRow).join("")}</div>
+     </div>`).join("") + `</div>` +
+    `<p class="hint">${t("shared.hint")}</p>`;
 }
 
 const STATUS_PILL = { waitlist: ["wait", "status.full"], unavailable: ["off", "status.unavailable"] };
@@ -441,6 +563,71 @@ function renderClasses(rows, isBookings) {
 async function loadAutomations() {
   try { autos = (await (await fetch("/api/automations")).json()) || []; } catch (e) {}
   if (state.view === "automations") renderAutomations();
+}
+
+// ---- admin (visible only to VA_ADMIN_EMAIL) ----
+let adminAutos = [], adminBookings = [];
+
+async function loadAdmin() {
+  try { adminAutos = (await (await fetch("/api/admin/automations")).json()) || []; } catch (e) { adminAutos = []; }
+  try { adminBookings = (await (await fetch("/api/admin/bookings")).json()) || []; } catch (e) { adminBookings = []; }
+  if (state.view === "admin") renderAdmin();
+}
+
+async function adminSetEnabled(userId, id, enabled) {
+  try {
+    await fetch(`/api/admin/automations?userId=${userId}&id=${id}&enabled=${enabled ? 1 : 0}`, { method: "PATCH" });
+    adminAutos = (await (await fetch("/api/admin/automations")).json()) || [];
+    renderAdmin();
+  } catch (e) { toast(t("toast.error") + ": " + e, true); }
+}
+
+async function adminRemove(userId, id) {
+  try {
+    await fetch(`/api/admin/automations?userId=${userId}&id=${id}`, { method: "DELETE" });
+    adminAutos = (await (await fetch("/api/admin/automations")).json()) || [];
+    renderAdmin();
+  } catch (e) { toast(t("toast.error") + ": " + e, true); }
+}
+
+function renderAdmin() {
+  const autoRows = adminAutos.length
+    ? adminAutos.map(r => `<tr>
+        <td class="owner">${r.ownerEmail}</td>
+        <td>${r.name}</td>
+        <td>${r.club}</td>
+        <td>${weekdayName(r.weekday)} ${r.start}</td>
+        <td>${r.enabled ? `<span class="pill active">${t("auto.pill.active")}</span>` : `<span class="pill paused">${t("auto.pill.paused")}</span>`}</td>
+        <td>
+          <button class="linkbtn" onclick="adminSetEnabled(${r.userId}, '${r.id}', ${!r.enabled})">${r.enabled ? t("auto.pause") : t("auto.activate")}</button>
+          <button class="linkbtn danger" onclick="adminRemove(${r.userId}, '${r.id}')">${t("auto.remove")}</button>
+        </td>
+      </tr>`).join("")
+    : `<tr><td colspan="6" class="empty">${t("admin.empty.automations")}</td></tr>`;
+
+  const bookingRows = adminBookings.length
+    ? adminBookings.map(b => `<tr>
+        <td class="owner">${b.ownerEmail}</td>
+        <td>${b.name}</td>
+        <td>${b.club}</td>
+        <td>${fmtItDate(b.date)} ${b.start}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="4" class="empty">${t("admin.empty.bookings")}</td></tr>`;
+
+  $("#out").innerHTML = `<div class="admin-wrap">
+    <div class="admin-section">
+      <h3>${t("admin.automations")}</h3>
+      <table class="atable"><thead><tr>
+        <th>${t("admin.owner")}</th><th>${t("admin.class")}</th><th>${t("admin.club")}</th><th>${t("admin.when")}</th><th>${t("admin.status")}</th><th>${t("admin.actions")}</th>
+      </tr></thead><tbody>${autoRows}</tbody></table>
+    </div>
+    <div class="admin-section">
+      <h3>${t("admin.bookings")}</h3>
+      <table class="atable"><thead><tr>
+        <th>${t("admin.owner")}</th><th>${t("admin.class")}</th><th>${t("admin.club")}</th><th>${t("admin.when")}</th>
+      </tr></thead><tbody>${bookingRows}</tbody></table>
+    </div>
+  </div>`;
 }
 
 const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
@@ -598,12 +785,13 @@ document.querySelectorAll(".chips").forEach(group => {
   group.addEventListener("click", e => {
     const chip = e.target.closest(".chip"); if (!chip) return;
     if (group.dataset.multi) {
-      // Cumulative multi-select (Class): "All" clears; each category toggles.
+      // Cumulative multi-select (Class/Day): "All" clears; each value toggles.
+      const set = state[group.dataset.key];
       const val = chip.dataset.val;
-      if (val === "") state.cats.clear();
-      else if (state.cats.has(val)) state.cats.delete(val);
-      else state.cats.add(val);
-      populateClassChips(all);
+      if (val === "") set.clear();
+      else if (set.has(val)) set.delete(val);
+      else set.add(val);
+      (group.id === "dayChips" ? populateDayChips : populateClassChips)(all);
     } else {
       // Single-select (Club).
       group.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
@@ -620,7 +808,9 @@ document.querySelectorAll(".tab").forEach(t =>
     state.view = t.dataset.view;
     render();
     if (state.view === "bookings") loadBookings();
+    else if (state.view === "shared") loadShared();
     else if (state.view === "automations") loadAutomations();
+    else if (state.view === "admin") loadAdmin();
   }));
 
 // ---- login ----
@@ -637,7 +827,9 @@ async function init() {
       if (LANGS.includes(me.lang)) { lang = me.lang; localStorage.setItem("lang", lang); }
       else fetch(`/api/lang?lang=${lang}`, { method: "PATCH" }).catch(() => {});
       applyI18n();
-      $("#user").textContent = me.email || "";
+      myEmail = me.email || "";
+      $("#user").textContent = myEmail;
+      if (me.isAdmin) $("#adminTab").style.display = "";
       showApp(); load();
     } else showLogin();
   } catch (e) { showLogin(); }
@@ -654,8 +846,19 @@ async function doLogin(e) {
       body: JSON.stringify({ email: $("#li-email").value, pass: $("#li-pass").value }),
     });
     const d = await res.json();
-    if (d.ok) { $("#li-err").textContent = ""; showApp(); load(); }
-    else $("#li-err").textContent = d.error || t("toast.error");
+    if (d.ok) {
+      // Ask the browser to save the credentials: with a fetch()-based login
+      // there's no navigation, so without this Chrome/Edge often don't offer it.
+      if (window.PasswordCredential) {
+        try {
+          await navigator.credentials.store(new PasswordCredential({
+            id: $("#li-email").value, password: $("#li-pass").value,
+          }));
+        } catch (e) { /* unsupported or dismissed: not a problem */ }
+      }
+      $("#li-err").textContent = "";
+      await init();
+    } else $("#li-err").textContent = d.error || t("toast.error");
   } catch (err) { $("#li-err").textContent = t("toast.error") + ": " + err; }
   btn.disabled = false;
 }

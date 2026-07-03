@@ -14,7 +14,7 @@ import (
 )
 
 // Booking policy: PRECISE, not continuous polling. A class's slots open when the
-// booking window opens (calisthenics 7 days before, solarium 2), at the class
+// booking window opens (8 days before; solarium, 2), at the class
 // time. So we only try at those instants —at the class time, each day from the
 // window opening until 24h before— instead of hammering Virgin every few minutes
 // (inefficient and a reason to get blocked).
@@ -29,7 +29,7 @@ const (
 	defaultGapSec   = 8                // wait between the following attempts
 	maxIdle         = 5 * time.Minute  // re-evaluate the schedule (no network) to pick up new rules
 	triggerGrace    = 15 * time.Minute // a fire only counts if we're within <=15min of its time (doesn't recover old fires)
-	horizonDays     = 8                // covers the longest window (calisthenics, 7 days)
+	horizonDays     = 9                // covers the longest window (8 days) with margin
 )
 
 // Engine runs the rules of ALL users with precise fires.
@@ -244,7 +244,7 @@ func (e *Engine) attempt(o occ, st *occState) {
 			st.lastError = err.Error()
 			log.Printf("automation: %s — round %d/%d: ERROR fetching the calendar: %v", tag, round+1, e.rounds, err)
 		} else {
-			matches := findMatches(classes, o.rule)
+			matches := findMatches(classes, o.rule, o.date)
 			switch {
 			case len(matches) == 0:
 				st.lastError = "not in the calendar yet"
@@ -303,7 +303,7 @@ func (e *Engine) attempt(o occ, st *occState) {
 	// failure email and a retry that would double-book).
 	if !st.booked && st.attempts > 0 {
 		if classes, err := e.fetchDay(o.rule.UserID, o.date); err == nil {
-			if bookedMatch(findMatches(classes, o.rule)) != nil {
+			if bookedMatch(findMatches(classes, o.rule, o.date)) != nil {
 				st.booked = true
 				log.Printf("automation: ✓ %s — BOOKED (confirmed in final reconciliation, despite the API error)", tag)
 				e.notifyBooked(o, st)
@@ -339,14 +339,17 @@ func (e *Engine) untilNext(now time.Time, occs []occ) time.Duration {
 	return sleep
 }
 
-// findMatches returns ALL instances matching the rule. The Solarium exposes
-// several "beds" at the same time (each a distinct bookable class), so a rule can
-// match more than one.
-func findMatches(classes []calendar.Class, r Rule) []*calendar.Class {
+// findMatches returns ALL instances matching the rule on the given date. The
+// Solarium exposes several "beds" at the same time (each a distinct bookable
+// class), so a rule can match more than one. The date check is deliberate and
+// NOT redundant with fetchDay's range: vapi has been observed to bleed a
+// neighboring day's session into a single-day query (same name/club/start every
+// day), which would otherwise get booked under the wrong date.
+func findMatches(classes []calendar.Class, r Rule, date string) []*calendar.Class {
 	var out []*calendar.Class
 	for i := range classes {
 		c := &classes[i]
-		if strings.EqualFold(c.Name, r.Name) && strings.EqualFold(c.Club, r.Club) && c.Start == r.Start {
+		if c.Date == date && strings.EqualFold(c.Name, r.Name) && strings.EqualFold(c.Club, r.Club) && c.Start == r.Start {
 			out = append(out, c)
 		}
 	}

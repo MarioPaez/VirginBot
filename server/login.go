@@ -158,6 +158,14 @@ func emailAllowed(email string) bool {
 	return false
 }
 
+// isAdmin reports whether email matches VA_ADMIN_EMAIL (the only account allowed
+// into the admin views). Empty VA_ADMIN_EMAIL disables the admin views for
+// everyone.
+func isAdmin(email string) bool {
+	admin := strings.ToLower(strings.TrimSpace(os.Getenv("VA_ADMIN_EMAIL")))
+	return admin != "" && strings.ToLower(strings.TrimSpace(email)) == admin
+}
+
 // clientIP obtains the client IP, honoring X-Forwarded-For behind a TLS-
 // terminating proxy (hosting). Takes the first hop of the chain.
 func clientIP(r *http.Request) string {
@@ -201,6 +209,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"configured": ok,
 		"email":      email,
 		"lang":       lang,
+		"isAdmin":    ok && isAdmin(email),
 	})
 }
 
@@ -245,4 +254,17 @@ func (s *Server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxUserID, userID)))
 	}
+}
+
+// requireAdmin guards a handler like requireSession, additionally requiring the
+// session's user to match VA_ADMIN_EMAIL: 403 for anyone else.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireSession(func(w http.ResponseWriter, r *http.Request) {
+		if !isAdmin(s.auth.Email(userIDFrom(r))) {
+			w.WriteHeader(http.StatusForbidden)
+			writeJSON(w, map[string]any{"error": "admin only"})
+			return
+		}
+		next(w, r)
+	})
 }

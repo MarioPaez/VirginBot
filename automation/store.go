@@ -26,17 +26,12 @@ type Rule struct {
 }
 
 // WindowDays reports how many days in advance the booking window opens by class
-// type: calisthenics 7 days before; solarium, 2.
+// type: every class 8 days before, except the solarium (2).
 func WindowDays(className string) int {
-	n := strings.ToLower(className)
-	switch {
-	case strings.Contains(n, "calisthenics"):
-		return 7
-	case strings.Contains(n, "solarium"):
-		return 2
-	default:
+	if strings.Contains(strings.ToLower(className), "solarium") {
 		return 2
 	}
+	return 8
 }
 
 func ruleKey(name, club string, weekday int, start string) string {
@@ -49,7 +44,17 @@ type Store struct {
 	db *sql.DB
 }
 
-func NewStore(db *sql.DB) *Store { return &Store{db: db} }
+func NewStore(db *sql.DB) *Store {
+	// Existing rules froze opens_days_before at creation with the old windows
+	// (calisthenics 7, everything else 2). Reconcile them with the current ones;
+	// idempotent, and there's no UI for per-rule windows that this could clobber.
+	if _, err := db.Exec(
+		`UPDATE automations SET opens_days_before = 8
+		 WHERE opens_days_before IN (2, 7) AND lower(name) NOT LIKE '%solarium%'`); err != nil {
+		log.Printf("reconcile automation windows: %v", err)
+	}
+	return &Store{db: db}
+}
 
 const ruleCols = `user_id, id, name, club, weekday, start, opens_days_before, enabled, created`
 

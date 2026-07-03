@@ -19,11 +19,11 @@ func mustLoc(t *testing.T) *time.Location {
 	return loc
 }
 
-// calisthenics (7-day window) on Monday 29/06 at 18:15.
+// calisthenics (8-day window) on Monday 29/06 at 18:15.
 func sampleOcc(loc *time.Location) occ {
 	start := time.Date(2026, 6, 29, 18, 15, 0, 0, loc)
 	return occ{
-		rule:  Rule{UserID: 1, ID: "x", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15", Weekday: 1, OpensDaysBefore: 7, Enabled: true},
+		rule:  Rule{UserID: 1, ID: "x", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15", Weekday: 1, OpensDaysBefore: 8, Enabled: true},
 		date:  "2026-06-29",
 		start: start,
 	}
@@ -33,14 +33,14 @@ func TestTriggers(t *testing.T) {
 	loc := mustLoc(t)
 	o := sampleOcc(loc)
 	trs := o.triggers()
-	if len(trs) != 7 {
-		t.Fatalf("expected 7 fires (T-7..T-1), got %d", len(trs))
+	if len(trs) != 8 {
+		t.Fatalf("expected 8 fires (T-8..T-1), got %d", len(trs))
 	}
-	if !trs[0].Equal(o.start.AddDate(0, 0, -7)) {
-		t.Errorf("first fire must be the opening T-7d: %v", trs[0])
+	if !trs[0].Equal(o.start.AddDate(0, 0, -8)) {
+		t.Errorf("first fire must be the opening T-8d: %v", trs[0])
 	}
-	if !trs[6].Equal(o.start.AddDate(0, 0, -1)) {
-		t.Errorf("last fire must be 24h before: %v", trs[6])
+	if !trs[7].Equal(o.start.AddDate(0, 0, -1)) {
+		t.Errorf("last fire must be 24h before: %v", trs[7])
 	}
 	for _, tr := range trs {
 		if tr.Hour() != 18 || tr.Minute() != 15 {
@@ -56,7 +56,7 @@ func TestFiresAtClassHourNotBefore(t *testing.T) {
 	var books int
 	fetch := func(int64, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
-			Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
 			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
 		}}, nil
 	}
@@ -93,7 +93,7 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	// The class is never bookable (full) → must notify after the last fire (24h before).
 	fetch := func(int64, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
-			Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
 			Status: "waitlist", ClubID: 209, ClassID: 387071, SessionID: 79403,
 		}}, nil
 	}
@@ -143,8 +143,10 @@ func TestPausedRuleNotScheduled(t *testing.T) {
 	e := NewEngine(store, nil, nil, nil, nil)
 	e.loc = loc
 
-	if got := countOcc(e.occurrences(now), rule.ID); got != 1 {
-		t.Fatalf("an active rule must be scheduled; occurrences=%d", got)
+	// The horizon (9 days) can span the same weekday twice: what matters is
+	// scheduled (>0) vs not scheduled (0), not the exact count.
+	if got := countOcc(e.occurrences(now), rule.ID); got == 0 {
+		t.Fatal("an active rule must be scheduled; occurrences=0")
 	}
 	if err := store.SetEnabled(7, rule.ID, false); err != nil {
 		t.Fatalf("pause: %v", err)
@@ -159,8 +161,8 @@ func TestPausedRuleNotScheduled(t *testing.T) {
 	if err := store.SetEnabled(7, rule.ID, true); err != nil {
 		t.Fatalf("re-enable: %v", err)
 	}
-	if got := countOcc(e.occurrences(now), rule.ID); got != 1 {
-		t.Fatalf("re-enabling must schedule it again; occurrences=%d", got)
+	if got := countOcc(e.occurrences(now), rule.ID); got == 0 {
+		t.Fatal("re-enabling must schedule it again; occurrences=0")
 	}
 }
 
@@ -186,7 +188,7 @@ func TestFinalReconcileConfirmsBooking(t *testing.T) {
 	fetch := func(int64, string) ([]calendar.Class, error) {
 		fetches++
 		c := calendar.Class{
-			Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
 			ClubID: 209, ClassID: 387071, SessionID: 79403,
 		}
 		// During the rounds it looks bookable; in the final reconciliation (last
