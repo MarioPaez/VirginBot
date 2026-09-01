@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/MarioPaez/VirginBot/i18n"
+	"github.com/MarioPaez/VirginBot/vapi"
 )
 
 const (
@@ -119,9 +121,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := s.auth.Login(req.Email, req.Pass)
 	if err != nil {
-		// Distinguish bad credentials from network/site-block problems.
+		// 401 from VA = bad credentials; anything else = network/service problem.
 		msg, code := "invalid credentials", http.StatusUnauthorized
-		if !strings.Contains(err.Error(), "rejected") {
+		if !errors.Is(err, vapi.ErrUnauthorized) && !strings.Contains(err.Error(), "rejected") {
 			msg, code = "couldn't connect to Virgin Active, try again in a moment", http.StatusBadGateway
 		}
 		w.WriteHeader(code)
