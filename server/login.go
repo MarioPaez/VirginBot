@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -121,11 +122,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := s.auth.Login(req.Email, req.Pass)
 	if err != nil {
-		// 401 from VA = bad credentials; anything else = network/service problem.
-		msg, code := "invalid credentials", http.StatusUnauthorized
-		if !errors.Is(err, vapi.ErrUnauthorized) && !strings.Contains(err.Error(), "rejected") {
-			msg, code = "couldn't connect to Virgin Active, try again in a moment", http.StatusBadGateway
-		}
+		code, msg := loginFailure(err)
+		// Never log the password; the raw error carries Virgin's status and body.
+		log.Printf("login failed for %s: HTTP %d: %v", req.Email, code, err)
 		w.WriteHeader(code)
 		writeJSON(w, map[string]any{"ok": false, "error": msg})
 		return
@@ -141,6 +140,30 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.InvalidateUser(userID) // reload the calendar with the authenticated session
 	writeJSON(w, map[string]any{"ok": true, "email": req.Email})
+}
+
+// loginFailure maps a login error to the HTTP code and the message shown to the
+// user, telling apart what they can fix (password, lockout) from outages on
+// Virgin's side and failures on ours.
+func loginFailure(err error) (int, string) {
+	var se *vapi.StatusError
+	var ne net.Error
+	switch {
+	case errors.Is(err, vapi.ErrBadCredentials):
+		return http.StatusUnauthorized, "Virgin Active rejected the email or password"
+	case errors.Is(err, errSaveAccount):
+		return http.StatusInternalServerError, "Virgin Active accepted the login, but VirginBot couldn't save your account; try again and tell the admin if it persists"
+	case errors.As(err, &se) && (se.Status == http.StatusForbidden || se.Status == http.StatusLocked || se.Status == http.StatusTooManyRequests):
+		return http.StatusBadGateway, fmt.Sprintf("Virgin Active is refusing the login (HTTP %d): the account may be temporarily locked after too many attempts; check that you can sign in on the official app", se.Status)
+	case errors.As(err, &se) && se.Status >= 500:
+		return http.StatusBadGateway, fmt.Sprintf("Virgin Active is having problems (HTTP %d), try again in a few minutes", se.Status)
+	case errors.As(err, &se):
+		return http.StatusBadGateway, fmt.Sprintf("Virgin Active answered the login with an unexpected error (HTTP %d)", se.Status)
+	case errors.As(err, &ne):
+		return http.StatusBadGateway, "couldn't reach Virgin Active (network error or timeout), try again in a moment"
+	default:
+		return http.StatusBadGateway, "unexpected answer from Virgin Active, try again in a moment"
+	}
 }
 
 // emailAllowed checks the optional VA_ALLOWED_EMAILS allowlist (comma-separated

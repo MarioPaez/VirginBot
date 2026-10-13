@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -144,6 +145,12 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 	s.fetchBookings(userID) // fresh bookings for the overlay
 	classes, err := s.freshClasses(userID, now, now.AddDate(0, 0, days-1))
+	if errors.Is(err, vapi.ErrBadCredentials) || errors.Is(err, errNoCreds) {
+		// 401 sends the FE back to the login form: the only fix is a new password.
+		w.WriteHeader(http.StatusUnauthorized)
+		writeJSON(w, map[string]any{"error": err.Error()})
+		return
+	}
 	if err != nil {
 		http.Error(w, "couldn't load the calendar: "+err.Error(), http.StatusBadGateway)
 		return

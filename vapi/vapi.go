@@ -26,8 +26,25 @@ const (
 	userAgent  = "Ktor client"
 )
 
-// ErrUnauthorized means an expired/invalid token (HTTP 401) → re-login.
+// ErrUnauthorized means an expired/invalid token (HTTP 401 on an authenticated
+// call) → re-login.
 var ErrUnauthorized = errors.New("vapi: unauthorized (expired token)")
+
+// ErrBadCredentials means Virgin rejected the email/password (HTTP 401 on
+// POST /sessions). Retrying won't help: only a new password will.
+var ErrBadCredentials = errors.New("vapi: Virgin Active rejected the email/password")
+
+// StatusError is a non-2xx answer from vapi (other than the 401s above). Callers
+// use Status to tell a lockout/rate limit (403/423/429) from an outage (5xx).
+type StatusError struct {
+	Method, Path string
+	Status       int
+	Body         string // truncated
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("vapi %s %s: HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
+}
 
 // Client calls the API with the app's static API key + the user's session token.
 type Client struct {
@@ -45,6 +62,11 @@ func Login(apiKey, email, pass string) (*Client, error) {
 	}
 	body := map[string]string{"memberId": email, "password": pass}
 	if err := c.do(http.MethodPost, "/sessions", nil, body, &out); err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			// A 401 here is the password, not a token: don't let callers mistake
+			// it for an expired session and re-login in a loop.
+			return nil, ErrBadCredentials
+		}
 		return nil, err
 	}
 	if out.Token == "" {
@@ -213,7 +235,7 @@ func (c *Client) do(method, path string, query url.Values, body, out any) error 
 		return ErrUnauthorized
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("vapi %s %s: HTTP %d: %s", method, path, resp.StatusCode, truncate(data, 200))
+		return &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: truncate(data, 200)}
 	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {

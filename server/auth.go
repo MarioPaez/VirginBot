@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -14,6 +16,14 @@ const authTTL = 100 * time.Minute
 
 var errNoCreds = errors.New("no credentials: please sign in")
 
+// errCredsRejected: Virgin rejected the STORED password (changed on Virgin's side,
+// or account locked). Wraps vapi.ErrBadCredentials so errors.Is works for both.
+var errCredsRejected = fmt.Errorf("%w; sign in again in VirginBot with your current password", vapi.ErrBadCredentials)
+
+// errSaveAccount: Virgin accepted the login but we failed to persist it (our
+// side: DB/encryption), so it must not be reported as a Virgin problem.
+var errSaveAccount = errors.New("couldn't save the account")
+
 // Auth keeps a PER-USER authenticated vapi client, re-logging in with the stored
 // credentials when the token expires.
 type Auth struct {
@@ -22,6 +32,10 @@ type Auth struct {
 
 	mu      sync.Mutex
 	clients map[int64]*authEntry
+	// rejected marks users whose stored password Virgin rejected. We stop
+	// re-logging in with it until they sign in again: every failed attempt counts
+	// toward Virgin's lockout, and the engine would otherwise retry every round.
+	rejected map[int64]bool
 }
 
 type authEntry struct {
@@ -30,7 +44,7 @@ type authEntry struct {
 }
 
 func NewAuth(store *account.Store, apiKey string) *Auth {
-	return &Auth{store: store, apiKey: apiKey, clients: map[int64]*authEntry{}}
+	return &Auth{store: store, apiKey: apiKey, clients: map[int64]*authEntry{}, rejected: map[int64]bool{}}
 }
 
 // Login validates the credentials against vapi, stores them encrypted (creating/
@@ -42,10 +56,11 @@ func (a *Auth) Login(email, pass string) (int64, error) {
 	}
 	userID, err := a.store.Upsert(email, pass)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%w: %v", errSaveAccount, err)
 	}
 	a.mu.Lock()
 	a.clients[userID] = &authEntry{client: client, expiry: time.Now().Add(authTTL)}
+	delete(a.rejected, userID) // fresh, valid password
 	a.mu.Unlock()
 	return userID, nil
 }
@@ -58,11 +73,19 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 	if e := a.clients[userID]; e != nil && time.Now().Before(e.expiry) {
 		return e.client, nil
 	}
+	if a.rejected[userID] {
+		return nil, errCredsRejected
+	}
 	email, pass, ok := a.store.Get(userID)
 	if !ok {
 		return nil, errNoCreds
 	}
 	c, err := vapi.Login(a.apiKey, email, pass)
+	if errors.Is(err, vapi.ErrBadCredentials) {
+		a.rejected[userID] = true
+		log.Printf("auth: u%d — Virgin rejected the stored password; pausing re-logins until the user signs in again", userID)
+		return nil, errCredsRejected
+	}
 	if err != nil {
 		return nil, err
 	}
