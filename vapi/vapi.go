@@ -34,6 +34,11 @@ var ErrUnauthorized = errors.New("vapi: unauthorized (expired token)")
 // POST /sessions). Retrying won't help: only a new password will.
 var ErrBadCredentials = errors.New("vapi: Virgin Active rejected the email/password")
 
+// ErrClientRejected means Virgin's gateway rejected the APP itself, not the user:
+// the static x-api-key was rotated, or the app id/version we impersonate is no
+// longer accepted. Every user fails until the constants/secret are updated.
+var ErrClientRejected = errors.New("vapi: Virgin Active rejected the app credentials (x-api-key / app id / app version): update them")
+
 // StatusError is a non-2xx answer from vapi (other than the 401s above). Callers
 // use Status to tell a lockout/rate limit (403/423/429) from an outage (5xx).
 type StatusError struct {
@@ -231,6 +236,9 @@ func (c *Client) do(method, path string, query url.Values, body, out any) error 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 
+	if clientRejected(resp.StatusCode, data) {
+		return fmt.Errorf("%w (%s %s: HTTP %d: %s)", ErrClientRejected, method, path, resp.StatusCode, truncate(data, 200))
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
 	}
@@ -246,6 +254,24 @@ func (c *Client) do(method, path string, query url.Values, body, out any) error 
 }
 
 // ---- helpers ----
+
+// clientRejected tells a gateway rejection of the app from a user-level 401.
+// Observed (Oct 2026): bad/missing x-api-key or app headers → 401
+// `{ "statusCode": 401, "message": "Unauthorized" }` (Azure gateway shape);
+// expired token / wrong password → 401 `{"error": "..."}` (backend shape).
+// 426 is the standard answer for a minimum app version, should they add one.
+func clientRejected(status int, body []byte) bool {
+	if status == http.StatusUpgradeRequired {
+		return true
+	}
+	if status != http.StatusUnauthorized {
+		return false
+	}
+	var gw struct {
+		StatusCode *int `json:"statusCode"`
+	}
+	return json.Unmarshal(body, &gw) == nil && gw.StatusCode != nil
+}
 
 func mapStatus(bookable string) string {
 	switch bookable {

@@ -14,6 +14,10 @@ import (
 // authTTL: the vapi token lasts ~2h; we refresh it (re-login) before then.
 const authTTL = 100 * time.Minute
 
+// clientAlertEvery throttles the "app credentials rejected" alert: the engine hits
+// it every round for every user, one email per window is enough.
+const clientAlertEvery = 6 * time.Hour
+
 var errNoCreds = errors.New("no credentials: please sign in")
 
 // errCredsRejected: Virgin rejected the STORED password (changed on Virgin's side,
@@ -36,6 +40,10 @@ type Auth struct {
 	// re-logging in with it until they sign in again: every failed attempt counts
 	// toward Virgin's lockout, and the engine would otherwise retry every round.
 	rejected map[int64]bool
+
+	alertMu   sync.Mutex
+	alert     func(subject, body string)
+	lastAlert time.Time
 }
 
 type authEntry struct {
@@ -47,12 +55,46 @@ func NewAuth(store *account.Store, apiKey string) *Auth {
 	return &Auth{store: store, apiKey: apiKey, clients: map[int64]*authEntry{}, rejected: map[int64]bool{}}
 }
 
+// OnClientRejected sets who gets told when Virgin rejects the app credentials
+// (x-api-key / app version): nothing works for anyone until they're updated.
+func (a *Auth) OnClientRejected(fn func(subject, body string)) {
+	a.alertMu.Lock()
+	a.alert = fn
+	a.alertMu.Unlock()
+}
+
+// observe fires the (throttled, async) alert on vapi.ErrClientRejected and
+// returns err unchanged, so it can wrap any return.
+func (a *Auth) observe(err error) error {
+	if !errors.Is(err, vapi.ErrClientRejected) {
+		return err
+	}
+	a.alertMu.Lock()
+	defer a.alertMu.Unlock()
+	log.Printf("auth: ALERT — %v", err)
+	if a.alert == nil || time.Since(a.lastAlert) < clientAlertEvery {
+		return err
+	}
+	a.lastAlert = time.Now()
+	alert := a.alert
+	go alert("VirginBot: Virgin Active rechaza la app (x-api-key / versión)",
+		"Virgin Active ha rechazado las credenciales de la app que usa VirginBot. "+
+			"Mientras no se actualicen, NO funciona el login, el calendario ni las reservas automáticas de ningún usuario.\n\n"+
+			"Error: "+err.Error()+"\n\n"+
+			"Qué hacer:\n"+
+			"1. Captura el tráfico de la app oficial (Proxyman con SSL Proxying) y mira x-api-key, x-app-id, x-app-version y el host.\n"+
+			"2. Si cambió la key: actualiza VA_API_KEY en .env y en Fly (fly secrets set VA_API_KEY=...).\n"+
+			"3. Si cambió la versión, el app id o el host: actualiza las constantes de vapi/vapi.go y despliega.\n\n"+
+			"No se volverá a avisar en las próximas 6 horas.")
+	return err
+}
+
 // Login validates the credentials against vapi, stores them encrypted (creating/
 // updating the user) and caches the session. Returns the user id.
 func (a *Auth) Login(email, pass string) (int64, error) {
 	client, err := vapi.Login(a.apiKey, email, pass)
 	if err != nil {
-		return 0, err
+		return 0, a.observe(err)
 	}
 	userID, err := a.store.Upsert(email, pass)
 	if err != nil {
@@ -87,7 +129,7 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 		return nil, errCredsRejected
 	}
 	if err != nil {
-		return nil, err
+		return nil, a.observe(err)
 	}
 	a.clients[userID] = &authEntry{client: c, expiry: time.Now().Add(authTTL)}
 	return c, nil
@@ -114,12 +156,12 @@ func (a *Auth) Do(userID int64, fn func(*vapi.Client) error) error {
 	}
 	err = fn(c)
 	if !errors.Is(err, vapi.ErrUnauthorized) {
-		return err
+		return a.observe(err)
 	}
 	a.Invalidate(userID)
 	c, err = a.ClientFor(userID)
 	if err != nil {
 		return err
 	}
-	return fn(c)
+	return a.observe(fn(c))
 }

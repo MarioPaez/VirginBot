@@ -151,6 +151,8 @@ func loginFailure(err error) (int, string) {
 	switch {
 	case errors.Is(err, vapi.ErrBadCredentials):
 		return http.StatusUnauthorized, "Virgin Active rejected the email or password"
+	case errors.Is(err, vapi.ErrClientRejected):
+		return http.StatusBadGateway, "Virgin Active rejected VirginBot's app credentials (key or app version are outdated); the admin has been notified"
 	case errors.Is(err, errSaveAccount):
 		return http.StatusInternalServerError, "Virgin Active accepted the login, but VirginBot couldn't save your account; try again and tell the admin if it persists"
 	case errors.As(err, &se) && (se.Status == http.StatusForbidden || se.Status == http.StatusLocked || se.Status == http.StatusTooManyRequests):

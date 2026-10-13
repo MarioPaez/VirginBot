@@ -92,6 +92,17 @@ func main() {
 	sender := notification.FromEnv()
 	srv := server.New(database, auth, acc, clubs, keep, store, sender)
 
+	// Outdated x-api-key / app version breaks everyone: tell the admin.
+	if admin := strings.TrimSpace(os.Getenv("VA_ADMIN_EMAIL")); admin != "" {
+		auth.OnClientRejected(func(subject, body string) {
+			if err := sender.Send(admin, subject, body); err != nil {
+				log.Printf("admin alert email failed: %v", err)
+			}
+		})
+	} else {
+		log.Println("warning: VA_ADMIN_EMAIL not set: no alert if Virgin rejects the app credentials")
+	}
+
 	// notifyUser routes each notification to the matching user's email.
 	notifyUser := func(userID int64, subject, body string) {
 		if err := sender.Send(auth.Email(userID), subject, body); err != nil {

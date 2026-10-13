@@ -19,6 +19,7 @@ func TestLoginFailure(t *testing.T) {
 	}{
 		{"bad credentials", vapi.ErrBadCredentials, http.StatusUnauthorized},
 		{"stored creds rejected", errCredsRejected, http.StatusUnauthorized},
+		{"app credentials outdated", fmt.Errorf("%w (x)", vapi.ErrClientRejected), http.StatusBadGateway},
 		{"our DB failed", fmt.Errorf("%w: disk full", errSaveAccount), http.StatusInternalServerError},
 		{"lockout", &vapi.StatusError{Status: http.StatusTooManyRequests}, http.StatusBadGateway},
 		{"outage", &vapi.StatusError{Status: http.StatusServiceUnavailable}, http.StatusBadGateway},
