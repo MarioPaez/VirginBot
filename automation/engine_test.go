@@ -122,6 +122,41 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	}
 }
 
+// Inside the last 24h (no fires left) the fallback only fires for a rule just
+// created, not for an old one after a restart (occState lives in memory).
+func TestFallbackOnlyForNewRules(t *testing.T) {
+	loc := mustLoc(t)
+	now := time.Date(2026, 6, 29, 8, 0, 0, 0, loc) // class day, 18:15 still ahead
+
+	var books int
+	fetch := func(int64, string) ([]calendar.Class, error) {
+		return []calendar.Class{{
+			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
+		}}, nil
+	}
+	book := func(int64, int, int, int, string) error { books++; return nil }
+	newEngine := func() *Engine {
+		e := NewEngine(nil, fetch, book, nil, nil)
+		e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
+		return e
+	}
+
+	old := sampleOcc(loc)
+	old.rule.Created = now.AddDate(0, 0, -10)
+	newEngine().maybeFire(old, now)
+	if books != 0 {
+		t.Fatalf("an old rule must not fire on restart inside the last 24h; books=%d", books)
+	}
+
+	fresh := sampleOcc(loc)
+	fresh.rule.Created = now.Add(-time.Minute)
+	newEngine().maybeFire(fresh, now)
+	if books != 1 {
+		t.Fatalf("a rule just created must try once; books=%d", books)
+	}
+}
+
 // Pausing a rule (enabled=0) must remove it from the engine's scheduling without
 // deleting it; re-enabling schedules it again. Uses a real temporary SQLite DB.
 func TestPausedRuleNotScheduled(t *testing.T) {

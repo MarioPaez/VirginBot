@@ -196,9 +196,12 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 		}
 	}
 
-	// Fallback: rule created with the window already open and WITHOUT future fires
-	// (in the last 24h before the class). Try once immediately, don't wait.
-	if dueT.IsZero() && !hasFuture && st.lastFired.IsZero() && st.attempts == 0 {
+	// Fallback: rule JUST created with the window already open and WITHOUT future
+	// fires (in the last 24h before the class). Try once immediately, don't wait.
+	// Gated on the rule's age because occState is in memory: without it every
+	// restart would re-fire it.
+	if dueT.IsZero() && !hasFuture && st.lastFired.IsZero() && st.attempts == 0 &&
+		now.Sub(o.rule.Created) <= triggerGrace {
 		open := o.start.AddDate(0, 0, -windowOf(o))
 		if !now.Before(open) && now.Before(o.start) {
 			dueT = now

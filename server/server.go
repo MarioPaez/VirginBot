@@ -610,13 +610,12 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 		if s.isBooked(userID, r.Name, r.Club, date, r.Start) {
 			continue
 		}
+		// An occurrence with no fire left (inside its last 24h) gets no more
+		// attempts from the engine: show the next one that still has fires.
 		for k := w; k >= 1; k-- {
 			if t := start.AddDate(0, 0, -k); t.After(now) {
 				return date, t, true
 			}
-		}
-		if !now.Before(start.AddDate(0, 0, -w)) {
-			return date, now, true
 		}
 	}
 	return "", time.Time{}, false
