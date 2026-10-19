@@ -67,9 +67,9 @@ func main() {
 		log.Println("OPEN access: any valid Virgin account can register (set VA_ALLOWED_EMAILS to restrict)")
 	}
 
-	clubs := []int{calendar.ClubCorsoComo, calendar.ClubCavour}
+	clubs := []int{calendar.ClubCorsoComo, calendar.ClubCavour, calendar.ClubPalermo}
 	// Classes we show: calisthenics, pilates (reformer), full body, TRX and cycle
-	// in both clubs; solarium only in Corso Como.
+	// in every club; solarium only in Corso Como.
 	keep := func(c calendar.Class) bool {
 		name := strings.ToLower(c.Name)
 		switch {

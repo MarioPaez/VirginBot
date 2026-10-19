@@ -7,12 +7,14 @@ package calendar
 const (
 	ClubCorsoComo = 209
 	ClubCavour    = 224
+	ClubPalermo   = 231
 )
 
 // ClubNames maps clubId → human-readable name.
 var ClubNames = map[int]string{
 	ClubCorsoComo: "Milano Corso Como",
 	ClubCavour:    "Milano Cavour",
+	ClubPalermo:   "Palermo",
 }
 
 // Class is a class scheduled in the calendar.
@@ -24,7 +26,7 @@ type Class struct {
 	Club       string `json:"club"`  // human-readable club name
 	Studio     string `json:"studio"`
 	Instructor string `json:"instructor"` // e.g. "Alessandro Restelli"
-	ClubID     int    `json:"clubId"`     // 209 / 224
+	ClubID     int    `json:"clubId"`     // 209 / 224 / 231
 	ClassID    int    `json:"classId"`    // class id (used to book)
 	SessionID  int    `json:"sessionId"`  // session id (used to book/cancel)
 	BookingID  int    `json:"bookingId"`  // member's booking id (used to cancel), only if Booked
