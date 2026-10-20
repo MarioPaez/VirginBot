@@ -11,3 +11,6 @@ virginbot.db-*
 
 # Logs
 logs/
+
+# Internal notes (public repo)
+notes/roadmap.md

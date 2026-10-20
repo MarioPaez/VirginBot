@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"sort"
 	"strconv"
@@ -111,6 +112,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/users", s.requireAdmin(s.handleAdminUsers))
 	mux.HandleFunc("/api/admin/automations", s.requireAdmin(s.handleAdminAutomations))
 	mux.HandleFunc("/api/admin/bookings", s.requireAdmin(s.handleAdminBookings))
+	// Not in Go's built-in MIME table; browsers want the proper type for the manifest.
+	mime.AddExtensionType(".webmanifest", "application/manifest+json")
 	static, _ := fs.Sub(webFS, "web")
 	mux.Handle("/", noCache(http.FileServer(http.FS(static))))
 	return mux
