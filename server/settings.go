@@ -19,7 +19,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, settings{ReminderHours: s.accounts.ReminderHours(userID), FullAction: s.accounts.FullAction(userID)})
+		writeJSON(w, map[string]any{
+			"reminderHours":  s.accounts.ReminderHours(userID),
+			"fullAction":     s.accounts.FullAction(userID),
+			"watchCutoffMin": int(watchCutoff().Minutes()), // for the "until N h before" text
+		})
 	case http.MethodPut:
 		var req settings
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&req); err != nil ||

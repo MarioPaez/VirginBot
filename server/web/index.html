@@ -75,17 +75,28 @@
   .chip { flex:none; height:36px; padding:0 14px; border-radius:999px; border:1px solid var(--line-2);
           background:transparent; color:var(--muted); cursor:pointer; font-size:14px; white-space:nowrap; }
   .chip.active { background:var(--text); border-color:var(--text); color:var(--bg); font-weight:600; }
+  .chip svg.i { width:16px; height:16px; vertical-align:-3px; margin-right:4px; }
 
-  .ichip { display:inline-flex; align-items:center; border:1px solid var(--line-2); border-radius:999px; }
-  .ichip .chip { border:none; padding-right:6px; }
-  .ichip .chip.active { border-radius:999px 0 0 999px; }
-  .ichip.active { border-color:var(--text); }
   .star { width:34px; height:34px; border:none; background:none; color:var(--dim); cursor:pointer; display:grid; place-items:center; padding:0 4px 0 0; }
   .star svg.i { width:17px; height:17px; }
   .star.on, .fav-i { color:var(--text); }
   .star.on svg.i, .fav-i svg.i { fill:currentColor; }
   .fav-i svg.i { width:13px; height:13px; vertical-align:-1px; margin-right:3px; }
   .sec-hint { color:var(--dim); font-size:12.5px; margin:10px 0 0; }
+  .sheet.tall { height:85vh; z-index:23; display:flex; flex-direction:column; overflow:hidden; }
+  .search { height:44px; margin-top:12px; background:var(--surface-2); border:1px solid var(--line-2); border-radius:12px;
+            padding:0 14px; color:var(--text); font-size:16px; outline:none; flex:none; }
+  .search:focus { border-color:var(--text); }
+  .ilist { flex:1; overflow-y:auto; margin:10px -16px 0; padding:0 16px calc(8px + var(--safe-b)); -webkit-overflow-scrolling:touch; }
+  .irow { display:flex; align-items:center; gap:10px; min-height:48px; border-bottom:1px solid var(--line); }
+  .irow .pick { flex:1; min-width:0; display:flex; align-items:center; gap:10px; height:48px; border:none; background:none;
+                text-align:left; cursor:pointer; font-size:15px; padding:0; }
+  .irow .pick span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .irow .star { width:44px; height:44px; padding:0; }
+  .irow .box { flex:none; width:20px; height:20px; border-radius:6px; border:2px solid var(--line-2); display:grid; place-items:center; }
+  .irow .box svg.i { width:14px; height:14px; stroke-width:3; opacity:0; }
+  .irow.on .box { background:var(--text); border-color:var(--text); color:var(--bg); }
+  .irow.on .box svg.i { opacity:1; }
 
   /* ---- Content ---- */
   main { max-width:760px; margin:0 auto; padding:4px 16px calc(var(--nav-h) + var(--safe-b) + 32px); }
@@ -244,6 +255,15 @@
   .choice svg.i { width:22px; height:22px; color:var(--muted); }
   .choice b { display:block; font-size:15px; }
   .choice small { display:block; color:var(--muted); font-size:13px; margin-top:2px; }
+  .opts { display:grid; gap:8px; }
+  .opt { display:flex; align-items:flex-start; gap:12px; width:100%; padding:12px; border-radius:14px; text-align:left;
+         border:1px solid var(--line-2); background:transparent; cursor:pointer; }
+  .opt.active { border-color:var(--text); background:var(--surface-2); }
+  .opt .dot { flex:none; width:18px; height:18px; margin-top:2px; border-radius:50%; border:2px solid var(--line-2); }
+  .opt.active .dot { border:5px solid var(--text); }
+  .opt b { display:block; font-size:14.5px; font-weight:600; }
+  .opt small { display:block; color:var(--muted); font-size:13px; line-height:1.4; margin-top:2px; }
+  .sec-hint.lead { margin:-4px 0 10px; }
   .seg { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:4px; border-radius:12px; background:var(--surface-2); }
   .seg button { height:36px; border:none; border-radius:9px; background:transparent; color:var(--muted); font-weight:600; cursor:pointer; }
   .seg button.active { background:var(--text); color:var(--bg); }
@@ -326,8 +346,7 @@
   <div class="sec"><p class="sec-t" data-i18n="filter.class">Class</p><div class="chips" id="classChips"></div></div>
   <div class="sec" id="pilatesGroup" style="display:none"><p class="sec-t" data-i18n="filter.pilates">Pilates type</p><div class="chips" id="pilatesChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="filter.club">Club</p><div class="chips" id="clubChips"></div></div>
-  <div class="sec"><p class="sec-t" data-i18n="filter.instructor">Instructor</p><div class="chips" id="instrChips"></div>
-    <p class="sec-hint" data-i18n="fav.hint">Tap the star to mark your favourite instructors.</p></div>
+  <div class="sec"><p class="sec-t" data-i18n="filter.instructor">Instructor</p><div class="chips" id="instrChips"></div></div>
   <div class="foot"><button class="btn btn-primary btn-block" id="filterShow" onclick="closeSheets()"></button></div>
 </div>
 <div class="sheet" id="acctSheet" role="dialog" aria-modal="true">
@@ -337,9 +356,18 @@
   <div class="sec" id="pushSec" style="display:none"><p class="sec-t" data-i18n="menu.notifications">Notifications</p><div class="pushbox" id="pushBox"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.cal">Phone calendar</p><div class="pushbox" id="calBox"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.reminder">Reminder before each class</p><div class="chips" id="reminderChips"></div></div>
-  <div class="sec"><p class="sec-t" data-i18n="set.full">If an automation is still full 24 h before</p><div class="chips" id="fullChips"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.full">If an automation doesn't get a spot</p>
+    <p class="sec-hint lead" data-i18n="set.full.hint"></p><div class="opts" id="fullChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="menu.language">Language</p><div class="seg langseg"></div></div>
   <div class="sec"><button class="btn btn-block btn-danger" onclick="logout()"><svg class="i"><use href="#i-logout"/></svg><span data-i18n="action.logout">Log out</span></button></div>
+</div>
+
+<div class="sheet tall" id="instrSheet" role="dialog" aria-modal="true">
+  <div class="grab"></div>
+  <h2><span data-i18n="filter.instructor">Instructor</span><button class="linkbtn" onclick="closeSheet('instrSheet')" data-i18n="action.done">Done</button></h2>
+  <input class="search" id="instrSearch" type="search" autocomplete="off" data-i18n-ph="instr.search" oninput="renderInstrList()">
+  <p class="sec-hint" data-i18n="fav.hint">Tap the star to mark your favourite instructors.</p>
+  <div class="ilist" id="instrList"></div>
 </div>
 
 <div class="sheet" id="autoSheet" role="dialog" aria-modal="true">
@@ -448,12 +476,13 @@ const I18N = {
     "row.spots": "%d posti liberi", "row.spot1": "1 posto libero", "status.opens": "Apre %s",
     "autosheet.title": "Automatizza questa lezione", "autosheet.weekly": "Ogni settimana", "autosheet.weekly.sub": "Ogni %s alle %s", "autosheet.once": "Solo questa volta", "auto.onlyon": "Solo il <b>%s</b>",
     "admin.engine": "Motore", "admin.lastcycle": "Ultimo ciclo: %s", "admin.engineoff": "Il motore non è attivo su questo server.", "admin.attempts": "Ultimi tentativi", "admin.outcome": "Esito", "admin.source": "Origine", "admin.detail": "Dettaglio", "admin.empty.attempts": "Nessun tentativo registrato.", "admin.lastday": "Ultime 24 h: %d prenotate · %d errori · %d senza posto", "outcome.booked": "Prenotata", "outcome.waitlisted": "In lista", "outcome.unavailable": "Senza posto", "outcome.error": "Errore", "outcome.missed": "Scaduta", "source.engine": "Auto", "source.watch": "Osserva",
-    "action.watch": "Osserva", "watch.on.title": "La sto osservando: tocca per smettere", "watch.off.title": "Prenotala da sola se si libera un posto", "row.watching": "Osservo se si libera un posto", "toast.watching": "Ok: se si libera un posto la prenoto (fino a %d h prima)", "toast.unwatched": "Non la osservo più", "watch.section": "Osservate", "set.full": "Se un'automazione è ancora piena 24 h prima", "set.full.notify": "Avvisami", "set.full.waitlist": "Lista d'attesa", "set.full.watch": "Continua a osservare", "toast.saved": "Salvato ✓",
+    "action.watch": "Osserva", "watch.on.title": "La sto osservando: tocca per smettere", "watch.off.title": "Prenotala da sola se si libera un posto", "row.watching": "Osservo se si libera un posto", "toast.watching": "Ok: se si libera un posto la prenoto (fino a %d h prima)", "toast.unwatched": "Non la osservo più", "watch.section": "Osservate", "set.full": "Se un'automazione non trova posto", "set.full.notify": "Avvisami e basta", "set.full.waitlist": "Mettimi in lista d'attesa", "set.full.watch": "Continua a tenerla d'occhio", "toast.saved": "Salvato ✓",
     "set.reminder": "Promemoria prima di ogni lezione", "set.off": "No", "set.hours": "%d h prima",
     "set.cal": "Calendario del telefono", "cal.hint": "Le tue prenotazioni nel calendario del telefono, sempre aggiornate. Il link è privato: non condividerlo.", "cal.add": "Aggiungi al calendario", "cal.copy": "Copia link", "cal.reset": "Nuovo link", "toast.copied": "Link copiato ✓", "toast.calreset": "Nuovo link creato: quello vecchio non funziona più",
     "stats.month": "Questo mese", "stats.total": "Totale", "stats.bybot": "Da VirginBot", "stats.streak": "Settimane di fila", "stats.top": "La più frequente: <b>%s</b> (%d)", "stats.since": "Dal %s",
     "filter.instructor": "Istruttore", "filter.favs": "Preferiti", "fav.hint": "Tocca la stella per segnare i tuoi istruttori preferiti.", "fav.on": "Preferito", "fav.off": "Segna come preferito",
     "toast.oncetaken": "Questa lezione è già automatizzata solo per il %s. Scegli «Ogni settimana» per coprire entrambe.",
+    "set.full.hint": "Provo ogni giorno all'ora della lezione fino a 24 h prima. Se a quel punto è ancora piena:", "set.full.notify.sub": "Ti mando una notifica, nient'altro.", "set.full.waitlist.sub": "Se la lezione ha la lista d'attesa ti iscrivo: entri se qualcuno annulla.", "set.full.watch.sub": "La controllo ogni pochi minuti e la prenoto se si libera un posto, fino a %d h prima.", "instr.choose": "Scegli…", "instr.search": "Cerca istruttore", "instr.none": "Nessun istruttore trovato.", "action.done": "Fatto",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -490,12 +519,13 @@ const I18N = {
     "row.spots": "Quedan %d plazas", "row.spot1": "Queda 1 plaza", "status.opens": "Abre %s",
     "autosheet.title": "Automatizar esta clase", "autosheet.weekly": "Cada semana", "autosheet.weekly.sub": "Cada %s a las %s", "autosheet.once": "Solo esta vez", "auto.onlyon": "Solo el <b>%s</b>",
     "admin.engine": "Motor", "admin.lastcycle": "Último ciclo: %s", "admin.engineoff": "El motor no está activo en este servidor.", "admin.attempts": "Últimos intentos", "admin.outcome": "Resultado", "admin.source": "Origen", "admin.detail": "Detalle", "admin.empty.attempts": "No hay intentos registrados.", "admin.lastday": "Últimas 24 h: %d reservadas · %d errores · %d sin plaza", "outcome.booked": "Reservada", "outcome.waitlisted": "En lista", "outcome.unavailable": "Sin plaza", "outcome.error": "Error", "outcome.missed": "Expirada", "source.engine": "Auto", "source.watch": "Vigilar",
-    "action.watch": "Vigilar", "watch.on.title": "La estoy vigilando: toca para dejarlo", "watch.off.title": "Resérvala sola si se libera una plaza", "row.watching": "Vigilando por si se libera una plaza", "toast.watching": "Hecho: si se libera una plaza la reservo (hasta %d h antes)", "toast.unwatched": "Ya no la vigilo", "watch.section": "Vigilando", "set.full": "Si una automatización sigue llena 24 h antes", "set.full.notify": "Avísame", "set.full.waitlist": "Lista de espera", "set.full.watch": "Seguir vigilando", "toast.saved": "Guardado ✓",
+    "action.watch": "Vigilar", "watch.on.title": "La estoy vigilando: toca para dejarlo", "watch.off.title": "Resérvala sola si se libera una plaza", "row.watching": "Vigilando por si se libera una plaza", "toast.watching": "Hecho: si se libera una plaza la reservo (hasta %d h antes)", "toast.unwatched": "Ya no la vigilo", "watch.section": "Vigilando", "set.full": "Si una automatización no consigue plaza", "set.full.notify": "Solo avisarme", "set.full.waitlist": "Apuntarme a la lista de espera", "set.full.watch": "Seguir vigilándola", "toast.saved": "Guardado ✓",
     "set.reminder": "Recordatorio antes de cada clase", "set.off": "No", "set.hours": "%d h antes",
     "set.cal": "Calendario del móvil", "cal.hint": "Tus reservas en el calendario del móvil, siempre al día. El enlace es privado: no lo compartas.", "cal.add": "Añadir al calendario", "cal.copy": "Copiar enlace", "cal.reset": "Nuevo enlace", "toast.copied": "Enlace copiado ✓", "toast.calreset": "Nuevo enlace creado: el anterior ya no funciona",
     "stats.month": "Este mes", "stats.total": "Total", "stats.bybot": "Por VirginBot", "stats.streak": "Semanas seguidas", "stats.top": "La que más: <b>%s</b> (%d)", "stats.since": "Desde el %s",
     "filter.instructor": "Instructor", "filter.favs": "Favoritos", "fav.hint": "Toca la estrella para marcar a tus instructores favoritos.", "fav.on": "Favorito", "fav.off": "Marcar como favorito",
     "toast.oncetaken": "Esta clase ya está automatizada solo para el %s. Elige «Cada semana» para cubrir ambas.",
+    "set.full.hint": "Lo intento cada día a la hora de la clase hasta 24 h antes. Si para entonces sigue llena:", "set.full.notify.sub": "Te mando una notificación y nada más.", "set.full.waitlist.sub": "Si la clase tiene lista de espera te apunto: entras si alguien cancela.", "set.full.watch.sub": "La reviso cada pocos minutos y la reservo si se libera una plaza, hasta %d h antes.", "instr.choose": "Elegir…", "instr.search": "Buscar instructor", "instr.none": "Ningún instructor encontrado.", "action.done": "Hecho",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -532,12 +562,13 @@ const I18N = {
     "row.spots": "%d spots left", "row.spot1": "1 spot left", "status.opens": "Opens %s",
     "autosheet.title": "Automate this class", "autosheet.weekly": "Every week", "autosheet.weekly.sub": "Every %s at %s", "autosheet.once": "Just this once", "auto.onlyon": "Only on <b>%s</b>",
     "admin.engine": "Engine", "admin.lastcycle": "Last cycle: %s", "admin.engineoff": "The engine isn't running on this server.", "admin.attempts": "Latest attempts", "admin.outcome": "Outcome", "admin.source": "Source", "admin.detail": "Detail", "admin.empty.attempts": "No attempts recorded.", "admin.lastday": "Last 24 h: %d booked · %d errors · %d no spot", "outcome.booked": "Booked", "outcome.waitlisted": "Waitlisted", "outcome.unavailable": "No spot", "outcome.error": "Error", "outcome.missed": "Expired", "source.engine": "Auto", "source.watch": "Watch",
-    "action.watch": "Watch", "watch.on.title": "Watching it: tap to stop", "watch.off.title": "Book it on its own if a spot frees up", "row.watching": "Watching for a freed spot", "toast.watching": "Done: if a spot frees up I'll book it (until %d h before)", "toast.unwatched": "Not watching it anymore", "watch.section": "Watching", "set.full": "If an automation is still full 24 h before", "set.full.notify": "Tell me", "set.full.waitlist": "Waitlist", "set.full.watch": "Keep watching", "toast.saved": "Saved ✓",
+    "action.watch": "Watch", "watch.on.title": "Watching it: tap to stop", "watch.off.title": "Book it on its own if a spot frees up", "row.watching": "Watching for a freed spot", "toast.watching": "Done: if a spot frees up I'll book it (until %d h before)", "toast.unwatched": "Not watching it anymore", "watch.section": "Watching", "set.full": "If an automation doesn't get a spot", "set.full.notify": "Just tell me", "set.full.waitlist": "Put me on the waitlist", "set.full.watch": "Keep watching it", "toast.saved": "Saved ✓",
     "set.reminder": "Reminder before each class", "set.off": "Off", "set.hours": "%d h before",
     "set.cal": "Phone calendar", "cal.hint": "Your bookings in your phone's calendar, always up to date. The link is private: don't share it.", "cal.add": "Add to calendar", "cal.copy": "Copy link", "cal.reset": "New link", "toast.copied": "Link copied ✓", "toast.calreset": "New link created: the old one stopped working",
     "stats.month": "This month", "stats.total": "Total", "stats.bybot": "By VirginBot", "stats.streak": "Week streak", "stats.top": "Most frequent: <b>%s</b> (%d)", "stats.since": "Since %s",
     "filter.instructor": "Instructor", "filter.favs": "Favourites", "fav.hint": "Tap the star to mark your favourite instructors.", "fav.on": "Favourite", "fav.off": "Mark as favourite",
     "toast.oncetaken": "This class is already automated just for %s. Pick “Every week” to cover both.",
+    "set.full.hint": "I try every day at class time until 24 h before. If it's still full by then:", "set.full.notify.sub": "I send you a notification, nothing else.", "set.full.waitlist.sub": "If the class has a waitlist I join it: you're in if someone cancels.", "set.full.watch.sub": "I check it every few minutes and book it if a spot frees up, until %d h before.", "instr.choose": "Choose…", "instr.search": "Search instructor", "instr.none": "No instructor found.", "action.done": "Done",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -664,6 +695,42 @@ function closeSheets() {
   $("#sheetBg").classList.remove("open");
   document.querySelectorAll(".sheet.open").forEach(s => s.classList.remove("open"));
 }
+// closeSheet closes one sheet (e.g. the instructor list over the filters),
+// keeping the backdrop while another one is still open.
+function closeSheet(id) {
+  $("#" + id).classList.remove("open");
+  if (!document.querySelector(".sheet.open")) $("#sheetBg").classList.remove("open");
+}
+
+// Swipe a sheet down to close it, like a native bottom sheet. The drag only
+// starts when the sheet (or the list being touched) is scrolled to the top, so
+// scrolling its content up keeps working.
+document.querySelectorAll(".sheet").forEach(sheet => {
+  let y0 = null, dy = 0, t0 = 0;
+  const scroller = target => target.closest(".ilist") || sheet;
+  sheet.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || scroller(e.target).scrollTop > 0 || e.target.closest("input")) { y0 = null; return; }
+    y0 = e.touches[0].clientY; dy = 0; t0 = Date.now();
+  }, { passive: true });
+  sheet.addEventListener("touchmove", e => {
+    if (y0 === null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0) { sheet.style.transform = ""; return; } // dragging up: let it scroll
+    e.preventDefault();
+    sheet.style.transition = "none";
+    sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: false });
+  const end = () => {
+    if (y0 === null) return;
+    y0 = null;
+    sheet.style.transition = "";
+    sheet.style.transform = "";
+    const fast = dy > 40 && dy / Math.max(1, Date.now() - t0) > 0.5; // a quick flick
+    if (dy > Math.min(120, sheet.offsetHeight / 4) || fast) closeSheet(sheet.id);
+  };
+  sheet.addEventListener("touchend", end);
+  sheet.addEventListener("touchcancel", end);
+});
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheets(); });
 
 async function load() {
@@ -697,7 +764,7 @@ function populateFilters() {
   populateClassChips(all);
   populatePilatesChips(all);
   populateClubChips(all);
-  populateInstructorChips(all);
+  populateInstructorChips();
   updateFilterBar();
 }
 
@@ -749,15 +816,49 @@ const hasFav = c => instructorsOf(c).some(i => favs.has(i));
 
 // Instructor chips (cumulative multi-select) for the club in view, favourites
 // first; each with a star to (un)mark it as favourite.
-function populateInstructorChips(list) {
-  const names = [...new Set(list.filter(c => !state.club || c.club === state.club).flatMap(instructorsOf))]
-    .sort((a, b) => (favs.has(b) - favs.has(a)) || a.localeCompare(b));
-  const chip = n => `<span class="ichip${state.instr.has(n) ? " active" : ""}"><button class="chip${state.instr.has(n) ? " active" : ""}" data-val="${esc(n)}">${esc(n)}</button><button class="star${favs.has(n) ? " on" : ""}" data-fav="${esc(n)}" title="${t(favs.has(n) ? "fav.on" : "fav.off")}">${icon("i-star")}</button></span>`;
+// The filter sheet keeps the instructor section to one row: All, Favourites,
+// the instructors already picked and "Choose…", which opens a searchable list.
+function populateInstructorChips() {
+  const picked = [...state.instr].filter(n => n !== FAVS).sort((a, b) => a.localeCompare(b));
   $("#instrChips").innerHTML =
     `<button class="chip${state.instr.size === 0 ? " active" : ""}" data-val="">${t("all.m")}</button>` +
-    (favs.size ? `<button class="chip${state.instr.has(FAVS) ? " active" : ""}" data-val="${FAVS}">${icon("i-star")} ${t("filter.favs")}</button>` : "") +
-    names.map(chip).join("");
+    (favs.size ? `<button class="chip${state.instr.has(FAVS) ? " active" : ""}" data-val="${FAVS}">${icon("i-star")}${t("filter.favs")}</button>` : "") +
+    picked.map(n => `<button class="chip active" data-val="${esc(n)}">${esc(n)}</button>`).join("") +
+    `<button class="chip" data-pick="1">${t("instr.choose")}</button>`;
+  if ($("#instrSheet").classList.contains("open")) renderInstrList();
 }
+
+// Instructors teaching in the club in view, favourites first.
+function instructorNames() {
+  return [...new Set(all.filter(c => !state.club || c.club === state.club).flatMap(instructorsOf))]
+    .sort((a, b) => (favs.has(b) - favs.has(a)) || a.localeCompare(b));
+}
+
+function openInstrPicker() {
+  $("#instrSearch").value = "";
+  renderInstrList();
+  openSheet("instrSheet");
+}
+
+function renderInstrList() {
+  const norm = x => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); // "dacco" finds "Daccò"
+  const q = norm($("#instrSearch").value.trim());
+  const names = instructorNames().filter(n => !q || norm(n).includes(q));
+  $("#instrList").innerHTML = names.length ? names.map(n => `<div class="irow${state.instr.has(n) ? " on" : ""}">
+      <button class="pick" data-val="${esc(n)}"><span class="box">${icon("i-check")}</span><span>${esc(n)}</span></button>
+      <button class="star${favs.has(n) ? " on" : ""}" data-fav="${esc(n)}" title="${t(favs.has(n) ? "fav.on" : "fav.off")}" aria-label="${t(favs.has(n) ? "fav.on" : "fav.off")}">${icon("i-star")}</button>
+    </div>`).join("") : `<div class="empty">${t("instr.none")}</div>`;
+}
+
+$("#instrList").addEventListener("click", e => {
+  const star = e.target.closest(".star");
+  if (star) return toggleFav(star.dataset.fav);
+  const pick = e.target.closest(".pick"); if (!pick) return;
+  const n = pick.dataset.val;
+  state.instr.has(n) ? state.instr.delete(n) : state.instr.add(n);
+  populateFilters();
+  render();
+});
 
 async function toggleFav(name) {
   const on = !favs.has(name);
@@ -1280,9 +1381,8 @@ $("#dayStrip").addEventListener("click", e => {
 // Club is single-select. The list updates live behind the sheet.
 [["#classChips", "cats"], ["#pilatesChips", "pilates"], ["#clubChips", "club"], ["#instrChips", "instr"]].forEach(([sel, key]) =>
   $(sel).addEventListener("click", e => {
-    const star = e.target.closest(".star");
-    if (star) return toggleFav(star.dataset.fav);
     const chip = e.target.closest(".chip"); if (!chip) return;
+    if (chip.dataset.pick) return openInstrPicker();
     const val = chip.dataset.val;
     if (key === "club") setClub(val);
     else if (val === "") state[key].clear();
@@ -1386,8 +1486,10 @@ async function loadSettings() {
 function renderSettings() {
   $("#reminderChips").innerHTML = [0, 2, 6, 12, 24]
     .map(h => `<button class="chip${settings.reminderHours === h ? " active" : ""}" onclick="saveSettings({ reminderHours: ${h} })">${h ? t("set.hours", h) : t("set.off")}</button>`).join("");
+  const cutoffH = Math.round((settings.watchCutoffMin || 120) / 60);
   $("#fullChips").innerHTML = [["", "set.full.notify"], ["waitlist", "set.full.waitlist"], ["watch", "set.full.watch"]]
-    .map(([v, k]) => `<button class="chip${settings.fullAction === v ? " active" : ""}" onclick="saveSettings({ fullAction: '${v}' })">${t(k)}</button>`).join("");
+    .map(([v, k]) => `<button class="opt${settings.fullAction === v ? " active" : ""}" role="radio" aria-checked="${settings.fullAction === v}"
+        onclick="saveSettings({ fullAction: '${v}' })"><span class="dot"></span><span><b>${t(k)}</b><small>${t(k + ".sub", cutoffH)}</small></span></button>`).join("");
 }
 
 async function saveSettings(patch) {
@@ -1395,7 +1497,7 @@ async function saveSettings(patch) {
     const res = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...settings, ...patch }) });
     if (!res.ok) throw new Error(await res.text());
-    settings = await res.json();
+    settings = { ...settings, ...(await res.json()) }; // PUT echoes only the editable fields
     renderSettings();
     toast(t("toast.saved"));
   } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
