@@ -139,3 +139,24 @@ func TestHealthProblem(t *testing.T) {
 		t.Fatalf("a booking in the same hour means vapi works: %q", p)
 	}
 }
+
+// A member without priority booking (2-day window) gets no fires before their
+// window opens; unknown windows keep the class's.
+func TestMemberWindowShortensTriggers(t *testing.T) {
+	loc := mustLoc(t)
+	store := testStore(t)
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
+	class := now.AddDate(0, 0, 5)
+	if _, err := store.Add(7, "Calisthenics", "Milano Corso Como", int(class.Weekday()), "18:15", ""); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(store, nil, nil, nil)
+	e.loc = loc
+	for _, tc := range []struct{ windowMin, fires int }{{2 * 24 * 60, 2}, {8 * 24 * 60, 8}, {0, 8}, {90, 8}} {
+		e.SetMemberWindow(func(int64) int { return tc.windowMin })
+		occs := e.occurrences(now)
+		if len(occs) != 1 || len(occs[0].triggers()) != tc.fires {
+			t.Fatalf("window %d min: expected %d fires, got %+v", tc.windowMin, tc.fires, occs)
+		}
+	}
+}

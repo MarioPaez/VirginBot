@@ -40,6 +40,17 @@ func WindowDays(className string) int {
 	return 8
 }
 
+// EffectiveWindow is how many days before a class a member can book it: the
+// class's window, shortened to the member's own booking window (minutes, from
+// their profile; 0 = unknown) when that's shorter and a whole number of days.
+func EffectiveWindow(className string, memberWindowMin int) int {
+	w := WindowDays(className)
+	if memberWindowMin > 0 && memberWindowMin%(24*60) == 0 {
+		w = min(w, memberWindowMin/(24*60))
+	}
+	return w
+}
+
 func ruleKey(name, club string, weekday int, start string) string {
 	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%s|%d|%s", name, club, weekday, start)))
 	return hex.EncodeToString(sum[:])[:12]

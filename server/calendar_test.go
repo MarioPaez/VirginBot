@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/calendar"
 )
 
@@ -23,26 +24,46 @@ func TestDedupeSumsSpots(t *testing.T) {
 	}
 }
 
+// vapi reports classes as "Available" before their window opens: OpensAt marks
+// them, with the member's own window when it's shorter than the class's.
 func TestMarkOpening(t *testing.T) {
-	s := &Server{}
-	s.loc, _ = time.LoadLocation("Europe/Rome")
+	s := testServer(t)
+	acc, err := account.NewStore(s.db, "test-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.accounts = acc
+	priority, _ := acc.Upsert("p@x", "pw")
+	regular, _ := acc.Upsert("r@x", "pw")
+	acc.SetMember(priority, 209, 8*24*60)
+	acc.SetMember(regular, 209, 2*24*60)
+
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, s.loc)
-	classes := []calendar.Class{
-		{Date: "2026-10-29", Start: "18:15", Name: "Calisthenics", Status: "unavailable"}, // opens 21/10 18:15
-		{Date: "2026-10-27", Start: "18:15", Name: "Calisthenics", Status: "unavailable"}, // opened yesterday
-		{Date: "2026-10-23", Start: "09:00", Name: "Solarium", Status: "unavailable"},     // 2-day window: 21/10 09:00
-		{Date: "2026-10-29", Start: "18:15", Name: "Calisthenics", Status: "bookable"},
+	at := func(d, hm string) string {
+		t, _ := time.ParseInLocation("2006-01-02 15:04", d+" "+hm, s.loc)
+		return t.Format(time.RFC3339)
 	}
-	s.markOpening(classes, now)
-	want := []string{
-		time.Date(2026, 10, 21, 18, 15, 0, 0, s.loc).Format(time.RFC3339),
-		"",
-		time.Date(2026, 10, 21, 9, 0, 0, 0, s.loc).Format(time.RFC3339),
-		"",
+	classes := func() []calendar.Class {
+		return []calendar.Class{
+			{Date: "2026-10-29", Start: "18:15", Name: "Calisthenics", Status: "bookable"}, // 8 days: opens 21/10
+			{Date: "2026-10-27", Start: "18:15", Name: "Calisthenics", Status: "bookable"}, // 8 days: open since 19/10
+			{Date: "2026-10-23", Start: "09:00", Name: "Solarium", Status: "bookable"},     // 2 days: opens 21/10
+			{Date: "2026-10-29", Start: "18:15", Name: "Calisthenics", Status: "booked", Booked: true},
+		}
 	}
-	for i, w := range want {
-		if classes[i].OpensAt != w {
-			t.Errorf("class %d: OpensAt = %q, want %q", i, classes[i].OpensAt, w)
+	for _, tc := range []struct {
+		user int64
+		want []string
+	}{
+		{priority, []string{at("2026-10-21", "18:15"), "", at("2026-10-21", "09:00"), ""}},
+		{regular, []string{at("2026-10-27", "18:15"), at("2026-10-25", "18:15"), at("2026-10-21", "09:00"), ""}},
+	} {
+		cs := classes()
+		s.markOpening(tc.user, cs, now)
+		for i, w := range tc.want {
+			if cs[i].OpensAt != w {
+				t.Errorf("user %d class %d: OpensAt = %q, want %q", tc.user, i, cs[i].OpensAt, w)
+			}
 		}
 	}
 }

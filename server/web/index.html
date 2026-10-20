@@ -846,6 +846,13 @@ async function loadShared() {
 
 const displayName = email => capitalize(String(email).split("@")[0]);
 
+// notOpenYet: the class's booking window hasn't opened for this user yet.
+const notOpenYet = c => !!c.opensAt && new Date(c.opensAt) > new Date();
+
+// showsSpots: free places are worth showing on a bookable, open class. Not on
+// the Solarium: vapi gives it a placeholder capacity (62, nobody booked).
+const showsSpots = c => c.status === "bookable" && c.capacity > 0 && !notOpenYet(c) && classCategory(c.name) !== "Solarium";
+
 // rowHead is the common part of a class row: time + duration, name with the
 // category icon, club · instructor.
 function rowHead(c) {
@@ -859,7 +866,7 @@ function rowHead(c) {
       : c.waitlisted ? `<div class="cwl">${icon("i-hourglass")}${t("row.waitlisted", c.waitlistPos)}</div>`
       : c.watched ? `<div class="cwatch">${icon("i-eye")}${t("row.watching")}</div>`
       : c.status === "waitlist" ? `<div class="cinfo">${c.waitlistCount ? t("row.waitcount", c.waitlistCount) : t("row.waitopen")}</div>`
-      : c.status === "bookable" && c.capacity > 0 ? `<div class="cinfo${c.spots <= 3 ? " low" : ""}">${c.spots === 1 ? t("row.spot1") : t("row.spots", c.spots)}</div>`
+      : showsSpots(c) ? `<div class="cinfo${c.spots <= 3 ? " low" : ""}">${c.spots === 1 ? t("row.spot1") : t("row.spots", c.spots)}</div>`
       : ""}`;
 }
 
@@ -907,12 +914,12 @@ function classActions(c) {
     right = `<button class="btn btn-danger push" onclick='act("unbook", ${payload(c)})'>${t("action.cancel")}</button>`;
   else if (c.waitlisted)
     right = `<button class="btn btn-danger push" onclick='act("unbook", ${payload(c)})'>${t("action.leave")}</button>`;
+  else if (notOpenYet(c)) // vapi says "Available" before the window opens: booking would fail
+    right = `<span class="pill off push">${t("status.opens", relWhen(c.opensAt))}</span>`;
   else if (c.status === "bookable")
     right = `<button class="btn btn-primary push" onclick='act("book", ${payload(c)})'>${t("action.book")}</button>`;
   else if (c.status === "waitlist")
     right = `<button class="btn btn-wait push" onclick='act("book", ${payload(c)})'>${t("action.joinwait")}</button>`;
-  else if (c.opensAt && new Date(c.opensAt) > new Date())
-    right = `<span class="pill off push">${t("status.opens", relWhen(c.opensAt))}</span>`;
   else {
     const [cls, key] = STATUS_PILL[c.status] || ["off", "status.unavailable"];
     right = `<span class="pill ${cls} push">${t(key)}</span>`;

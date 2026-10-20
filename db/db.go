@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
     home_club      INTEGER NOT NULL DEFAULT 0,  -- vapi clubId of the member's home club (0 = unknown)
     cal_token      TEXT NOT NULL DEFAULT '',    -- secret of the private .ics feed ('' = not created)
     reminder_hours INTEGER NOT NULL DEFAULT 0,  -- push a reminder N hours before each booking (0 = off)
-    full_action    TEXT NOT NULL DEFAULT ''     -- automated class still full at its last attempt: '' | 'waitlist' | 'watch'
+    full_action    TEXT NOT NULL DEFAULT '',    -- automated class still full at its last attempt: '' | 'waitlist' | 'watch'
+    window_min     INTEGER NOT NULL DEFAULT 0   -- how long before a class the member can book it, minutes (0 = unknown)
 );
 CREATE TABLE IF NOT EXISTS automations (
     user_id           INTEGER NOT NULL,
@@ -213,6 +214,7 @@ func migrate(d *sql.DB) error {
 		{"cal_token", "TEXT NOT NULL DEFAULT ''"},
 		{"reminder_hours", "INTEGER NOT NULL DEFAULT 0"},
 		{"full_action", "TEXT NOT NULL DEFAULT ''"},
+		{"window_min", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureColumn(d, "users", c[0], c[1]); err != nil {
 			return err

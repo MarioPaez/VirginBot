@@ -150,23 +150,40 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 	return out, nil
 }
 
-// HomeClub returns the clubId of the member's home club (GET /member,
-// memberships[].homeClubId), or 0 if Virgin doesn't report one.
-func (c *Client) HomeClub() (int, error) {
+// Member is what VirginBot uses from the member's profile.
+type Member struct {
+	HomeClub int // clubId of the home club, 0 if not reported
+	// WindowMin is how many minutes before a class this member can book it:
+	// priority members get a longer window (observed: 8 days vs 2). 0 = unknown.
+	WindowMin int
+}
+
+// Member reads the member's profile (GET /member).
+func (c *Client) Member() (Member, error) {
 	var m struct {
 		Memberships []struct {
 			HomeClubID int `json:"homeClubId"`
 		} `json:"memberships"`
+		RegularWindow int `json:"regularBookableTimeWindowInMinutes"`
+		Priority      struct {
+			IsPriority bool `json:"isPriorityMember"`
+			Window     int  `json:"memberBookableTimeWindowInMinutes"`
+		} `json:"priorityBooking"`
 	}
 	if err := c.do(http.MethodGet, "/member", nil, nil, &m); err != nil {
-		return 0, err
+		return Member{}, err
+	}
+	out := Member{WindowMin: m.RegularWindow}
+	if m.Priority.IsPriority && m.Priority.Window > 0 {
+		out.WindowMin = m.Priority.Window
 	}
 	for _, ms := range m.Memberships {
 		if ms.HomeClubID != 0 {
-			return ms.HomeClubID, nil
+			out.HomeClub = ms.HomeClubID
+			break
 		}
 	}
-	return 0, nil
+	return out, nil
 }
 
 type apiBooking struct {

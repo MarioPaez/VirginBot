@@ -140,7 +140,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.accounts.SetLang(userID, string(i18n.Normalize(r.Header.Get("Accept-Language"))))
 	}
 	s.InvalidateUser(userID) // reload the calendar with the authenticated session
-	go s.syncHomeClub(userID)
+	go s.syncMember(userID)
 	writeJSON(w, map[string]any{"ok": true, "email": req.Email})
 }
 

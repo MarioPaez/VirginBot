@@ -40,17 +40,18 @@ const (
 
 // Engine runs the rules of ALL users with precise fires.
 type Engine struct {
-	store    *Store
-	fetchDay func(userID int64, club, date string) ([]calendar.Class, error) // fresh fetch of a club's day (authenticated, curated)
-	book     func(userID int64, clubID, classID, sessionID int, date string) error
-	push     func(userID int64, title, body, url string) // booking outcomes on the user's devices (SetPush); nil = silent
-	lang     func(userID int64) string                   // user's language for notifications (it/es/en); nil = Default
-	loc      *time.Location
-	rounds   int           // attempts per fire
-	lead     time.Duration // lead after the hour before the 1st attempt
-	gap1     time.Duration // wait between the 1st and 2nd attempt
-	gap      time.Duration // wait between the following attempts
-	debug    bool          // VIRGINBOT_DEBUG: logs every evaluation (for local observation)
+	store        *Store
+	fetchDay     func(userID int64, club, date string) ([]calendar.Class, error) // fresh fetch of a club's day (authenticated, curated)
+	book         func(userID int64, clubID, classID, sessionID int, date string) error
+	push         func(userID int64, title, body, url string) // booking outcomes on the user's devices (SetPush); nil = silent
+	lang         func(userID int64) string                   // user's language for notifications (it/es/en); nil = Default
+	memberWindow func(userID int64) int                      // member's booking window in minutes (0 = unknown); nil = class windows only
+	loc          *time.Location
+	rounds       int           // attempts per fire
+	lead         time.Duration // lead after the hour before the 1st attempt
+	gap1         time.Duration // wait between the 1st and 2nd attempt
+	gap          time.Duration // wait between the following attempts
+	debug        bool          // VIRGINBOT_DEBUG: logs every evaluation (for local observation)
 
 	onBooked func(userID int64, r Rule, date string) // a booking went through (history: booked by the bot)
 	// onMissed runs after the last fire of an occurrence that's still full
@@ -108,6 +109,10 @@ func NewEngine(
 // devices). Not set = no notifications.
 func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.push = fn }
 
+// SetMemberWindow sets where the engine reads each member's booking window, so
+// it doesn't fire before the window opens for members without priority booking.
+func (e *Engine) SetMemberWindow(fn func(userID int64) int) { e.memberWindow = fn }
+
 // SetOnBooked sets what runs after each booking the engine makes.
 func (e *Engine) SetOnBooked(fn func(userID int64, r Rule, date string)) { e.onBooked = fn }
 
@@ -147,9 +152,10 @@ func envInt(key string, def int) int {
 
 // occ is a concrete occurrence of a rule (a specific day) for a user.
 type occ struct {
-	rule  Rule
-	date  string
-	start time.Time
+	rule   Rule
+	date   string
+	start  time.Time
+	window int // days before the class its booking opens for this member; 0 = the rule's
 }
 
 func (o occ) stateKey() string {
@@ -157,6 +163,9 @@ func (o occ) stateKey() string {
 }
 
 func windowOf(o occ) int {
+	if o.window > 0 {
+		return o.window
+	}
 	if o.rule.OpensDaysBefore > 0 {
 		return o.rule.OpensDaysBefore
 	}
@@ -228,6 +237,9 @@ func (e *Engine) occurrences(now time.Time) []occ {
 				continue
 			}
 			o := occ{rule: r, date: date, start: start}
+			if e.memberWindow != nil {
+				o.window = min(windowOf(o), EffectiveWindow(r.Name, e.memberWindow(r.UserID)))
+			}
 			if st := e.get(o.stateKey()); st != nil && (st.booked || st.waitlisted) {
 				continue
 			}

@@ -104,9 +104,17 @@ func (s *Store) HomeClub(userID int64) int {
 	return id
 }
 
-// SetHomeClub stores the user's home club (vapi clubId).
-func (s *Store) SetHomeClub(userID int64, clubID int) error {
-	_, err := s.db.Exec(`UPDATE users SET home_club = ? WHERE id = ?`, clubID, userID)
+// WindowMin returns how many minutes before a class the user can book it
+// (their membership's booking window; 0 = unknown).
+func (s *Store) WindowMin(userID int64) int {
+	var m int
+	s.db.QueryRow(`SELECT window_min FROM users WHERE id = ?`, userID).Scan(&m)
+	return m
+}
+
+// SetMember stores what the member's profile says: home club and booking window.
+func (s *Store) SetMember(userID int64, homeClub, windowMin int) error {
+	_, err := s.db.Exec(`UPDATE users SET home_club = ?, window_min = ? WHERE id = ?`, homeClub, windowMin, userID)
 	return err
 }
 

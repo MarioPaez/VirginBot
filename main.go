@@ -155,6 +155,7 @@ func main() {
 			srv.MarkBotBooked(userID, r.Name, r.Club, date, r.Start)
 		})
 		engine.SetOnMissed(srv.OnEngineMissed)
+		engine.SetMemberWindow(acc.WindowMin)
 		go engine.Run(make(chan struct{}))
 		go srv.RunWatches()   // books for real too: only where the engine runs
 		go srv.RunReminders() // pushes to real devices: same

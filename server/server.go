@@ -78,25 +78,28 @@ func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func
 func (s *Server) warm() {
 	for _, uid := range s.accounts.ListUserIDs() {
 		s.fetchBookings(uid)
-		if s.accounts.HomeClub(uid) == 0 {
-			s.syncHomeClub(uid) // users who signed in before the home club was stored
-		}
+		s.syncMember(uid) // the window can change (priority membership): refresh on every start
 	}
 }
 
-// syncHomeClub stores the member's home club (from vapi), the calendar's default
-// club filter.
-func (s *Server) syncHomeClub(userID int64) {
-	var club int
-	if err := s.auth.Do(userID, func(c *vapi.Client) (err error) { club, err = c.HomeClub(); return err }); err != nil {
-		log.Printf("home club u%d: %v", userID, err)
+// syncMember stores the member's home club (the calendar's default club filter)
+// and booking window (when classes open for them).
+func (s *Server) syncMember(userID int64) {
+	var m vapi.Member
+	if err := s.auth.Do(userID, func(c *vapi.Client) (err error) { m, err = c.Member(); return err }); err != nil {
+		log.Printf("member profile u%d: %v", userID, err)
 		return
 	}
-	if club != 0 {
-		if err := s.accounts.SetHomeClub(userID, club); err != nil {
-			log.Printf("home club u%d: %v", userID, err)
-		}
+	if err := s.accounts.SetMember(userID, m.HomeClub, m.WindowMin); err != nil {
+		log.Printf("member profile u%d: %v", userID, err)
 	}
+}
+
+// windowDays is how many days before a class this user can book it: the
+// class's window, shortened by the member's own if that's shorter (a member
+// without priority booking can't book 8 days ahead).
+func (s *Server) windowDays(userID int64, className string) int {
+	return automation.EffectiveWindow(className, s.accounts.WindowMin(userID))
 }
 
 // Waitlist sync: Virgin promotes people from the waitlist at any time (someone
@@ -253,7 +256,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	classes = s.futureOnly(classes)
-	s.markOpening(classes, now)
+	s.markOpening(userID, classes, now)
 	s.markWatched(userID, classes)
 	byDay := map[string][]calendar.Class{}
 	for _, c := range classes {
@@ -335,20 +338,21 @@ func dedupe(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// markOpening sets OpensAt on the classes that are unavailable only because
-// their booking window hasn't opened yet (the engine's first fire: class time −
-// window days), so the calendar can say when instead of "unavailable".
-func (s *Server) markOpening(classes []calendar.Class, now time.Time) {
+// markOpening sets OpensAt on the classes whose booking window hasn't opened
+// yet for this user (class time − window, the engine's first fire), so the
+// calendar says when instead of offering a booking that would fail: vapi
+// reports those classes as "Available" all the same.
+func (s *Server) markOpening(userID int64, classes []calendar.Class, now time.Time) {
 	for i := range classes {
 		c := &classes[i]
-		if c.Status != "unavailable" {
+		if c.Booked || c.Waitlisted {
 			continue
 		}
 		start, err := time.ParseInLocation("2006-01-02 15:04", c.Date+" "+c.Start, s.loc)
 		if err != nil {
 			continue
 		}
-		if open := start.AddDate(0, 0, -automation.WindowDays(c.Name)); open.After(now) {
+		if open := start.AddDate(0, 0, -s.windowDays(userID, c.Name)); open.After(now) {
 			c.OpensAt = open.Format(time.RFC3339)
 		}
 	}
@@ -837,9 +841,9 @@ type automationView struct {
 // attempt (the next fire at the class time).
 func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, attempt time.Time, ok bool) {
 	now := time.Now().In(s.loc)
-	w := r.OpensDaysBefore
+	w := min(r.OpensDaysBefore, s.windowDays(userID, r.Name))
 	if w <= 0 {
-		w = automation.WindowDays(r.Name)
+		w = s.windowDays(userID, r.Name)
 	}
 	for d := 0; d <= 14; d++ {
 		day := now.AddDate(0, 0, d)
