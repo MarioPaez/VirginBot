@@ -186,6 +186,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/settings", s.requireSession(s.handleSettings))
 	mux.HandleFunc("/api/calfeed", s.requireSession(s.handleCalFeed))
 	mux.HandleFunc("/api/stats", s.requireSession(s.handleStats))
+	mux.HandleFunc("/api/instructors/favs", s.requireSession(s.handleFavInstructors))
 	mux.HandleFunc("/cal/", s.handleICS) // authenticated by the secret in the path
 	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
 	mux.HandleFunc("/api/push", s.requireSession(s.handlePush))

@@ -76,6 +76,17 @@
           background:transparent; color:var(--muted); cursor:pointer; font-size:14px; white-space:nowrap; }
   .chip.active { background:var(--text); border-color:var(--text); color:var(--bg); font-weight:600; }
 
+  .ichip { display:inline-flex; align-items:center; border:1px solid var(--line-2); border-radius:999px; }
+  .ichip .chip { border:none; padding-right:6px; }
+  .ichip .chip.active { border-radius:999px 0 0 999px; }
+  .ichip.active { border-color:var(--text); }
+  .star { width:34px; height:34px; border:none; background:none; color:var(--dim); cursor:pointer; display:grid; place-items:center; padding:0 4px 0 0; }
+  .star svg.i { width:17px; height:17px; }
+  .star.on, .fav-i { color:var(--text); }
+  .star.on svg.i, .fav-i svg.i { fill:currentColor; }
+  .fav-i svg.i { width:13px; height:13px; vertical-align:-1px; margin-right:3px; }
+  .sec-hint { color:var(--dim); font-size:12.5px; margin:10px 0 0; }
+
   /* ---- Content ---- */
   main { max-width:760px; margin:0 auto; padding:4px 16px calc(var(--nav-h) + var(--safe-b) + 32px); }
   .daygroup { margin-top:20px; content-visibility:auto; contain-intrinsic-size:auto 900px; }
@@ -314,6 +325,8 @@
   <div class="sec"><p class="sec-t" data-i18n="filter.class">Class</p><div class="chips" id="classChips"></div></div>
   <div class="sec" id="pilatesGroup" style="display:none"><p class="sec-t" data-i18n="filter.pilates">Pilates type</p><div class="chips" id="pilatesChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="filter.club">Club</p><div class="chips" id="clubChips"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="filter.instructor">Instructor</p><div class="chips" id="instrChips"></div>
+    <p class="sec-hint" data-i18n="fav.hint">Tap the star to mark your favourite instructors.</p></div>
   <div class="foot"><button class="btn btn-primary btn-block" id="filterShow" onclick="closeSheets()"></button></div>
 </div>
 <div class="sheet" id="acctSheet" role="dialog" aria-modal="true">
@@ -372,6 +385,7 @@
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5a2 2 0 0 0 2 1.5h6a2 2 0 0 0 2-1.5L18 7M9 7V4.5h6V7"/></symbol>
@@ -391,7 +405,9 @@
 const DAYS = 10;
 const $ = s => document.querySelector(s);
 let all = [], autos = [], bookings = [], shared = [], myEmail = "", loadToken = 0;
-const state = { cats: new Set(), pilates: new Set(), date: "", club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
+const state = { cats: new Set(), pilates: new Set(), instr: new Set(), date: "", club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
+const FAVS = "\u2605"; // instr filter value meaning "any favourite instructor"
+let favs = new Set(); // favourite instructors (server-side, per user)
 
 // ---- i18n ----
 const LANGS = ["it", "es", "en"];
@@ -435,6 +451,7 @@ const I18N = {
     "set.reminder": "Promemoria prima di ogni lezione", "set.off": "No", "set.hours": "%d h prima",
     "set.cal": "Calendario del telefono", "cal.hint": "Le tue prenotazioni nel calendario del telefono, sempre aggiornate. Il link è privato: non condividerlo.", "cal.add": "Aggiungi al calendario", "cal.copy": "Copia link", "cal.reset": "Nuovo link", "toast.copied": "Link copiato ✓", "toast.calreset": "Nuovo link creato: quello vecchio non funziona più",
     "stats.month": "Questo mese", "stats.total": "Totale", "stats.bybot": "Da VirginBot", "stats.streak": "Settimane di fila", "stats.top": "La più frequente: <b>%s</b> (%d)", "stats.since": "Dal %s",
+    "filter.instructor": "Istruttore", "filter.favs": "Preferiti", "fav.hint": "Tocca la stella per segnare i tuoi istruttori preferiti.", "fav.on": "Preferito", "fav.off": "Segna come preferito",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -475,6 +492,7 @@ const I18N = {
     "set.reminder": "Recordatorio antes de cada clase", "set.off": "No", "set.hours": "%d h antes",
     "set.cal": "Calendario del móvil", "cal.hint": "Tus reservas en el calendario del móvil, siempre al día. El enlace es privado: no lo compartas.", "cal.add": "Añadir al calendario", "cal.copy": "Copiar enlace", "cal.reset": "Nuevo enlace", "toast.copied": "Enlace copiado ✓", "toast.calreset": "Nuevo enlace creado: el anterior ya no funciona",
     "stats.month": "Este mes", "stats.total": "Total", "stats.bybot": "Por VirginBot", "stats.streak": "Semanas seguidas", "stats.top": "La que más: <b>%s</b> (%d)", "stats.since": "Desde el %s",
+    "filter.instructor": "Instructor", "filter.favs": "Favoritos", "fav.hint": "Toca la estrella para marcar a tus instructores favoritos.", "fav.on": "Favorito", "fav.off": "Marcar como favorito",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -515,6 +533,7 @@ const I18N = {
     "set.reminder": "Reminder before each class", "set.off": "Off", "set.hours": "%d h before",
     "set.cal": "Phone calendar", "cal.hint": "Your bookings in your phone's calendar, always up to date. The link is private: don't share it.", "cal.add": "Add to calendar", "cal.copy": "Copy link", "cal.reset": "New link", "toast.copied": "Link copied ✓", "toast.calreset": "New link created: the old one stopped working",
     "stats.month": "This month", "stats.total": "Total", "stats.bybot": "By VirginBot", "stats.streak": "Week streak", "stats.top": "Most frequent: <b>%s</b> (%d)", "stats.since": "Since %s",
+    "filter.instructor": "Instructor", "filter.favs": "Favourites", "fav.hint": "Tap the star to mark your favourite instructors.", "fav.on": "Favourite", "fav.off": "Mark as favourite",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -647,6 +666,7 @@ async function load() {
   const token = ++loadToken;
   try { autos = (await (await fetch(`/api/automations`)).json()) || []; }
   catch (e) { autos = []; }
+  try { favs = new Set((await (await fetch("/api/instructors/favs")).json()) || []); } catch (e) {}
   await loadCalendar(token);
 }
 
@@ -673,6 +693,7 @@ function populateFilters() {
   populateClassChips(all);
   populatePilatesChips(all);
   populateClubChips(all);
+  populateInstructorChips(all);
   updateFilterBar();
 }
 
@@ -718,6 +739,34 @@ function populatePilatesChips(list) {
     types.map(p => `<button class="chip${state.pilates.has(p) ? " active" : ""}" data-val="${esc(p)}">${esc(p)}</button>`).join("");
 }
 
+// A class's instructors ("A, B" when it has several).
+const instructorsOf = c => (c.instructor || "").split(",").map(s => s.trim()).filter(Boolean);
+const hasFav = c => instructorsOf(c).some(i => favs.has(i));
+
+// Instructor chips (cumulative multi-select) for the club in view, favourites
+// first; each with a star to (un)mark it as favourite.
+function populateInstructorChips(list) {
+  const names = [...new Set(list.filter(c => !state.club || c.club === state.club).flatMap(instructorsOf))]
+    .sort((a, b) => (favs.has(b) - favs.has(a)) || a.localeCompare(b));
+  const chip = n => `<span class="ichip${state.instr.has(n) ? " active" : ""}"><button class="chip${state.instr.has(n) ? " active" : ""}" data-val="${esc(n)}">${esc(n)}</button><button class="star${favs.has(n) ? " on" : ""}" data-fav="${esc(n)}" title="${t(favs.has(n) ? "fav.on" : "fav.off")}">${icon("i-star")}</button></span>`;
+  $("#instrChips").innerHTML =
+    `<button class="chip${state.instr.size === 0 ? " active" : ""}" data-val="">${t("all.m")}</button>` +
+    (favs.size ? `<button class="chip${state.instr.has(FAVS) ? " active" : ""}" data-val="${FAVS}">${icon("i-star")} ${t("filter.favs")}</button>` : "") +
+    names.map(chip).join("");
+}
+
+async function toggleFav(name) {
+  const on = !favs.has(name);
+  try {
+    const res = await fetch(`/api/instructors/favs?name=${encodeURIComponent(name)}&on=${on ? 1 : 0}`, { method: "PUT" });
+    if (!res.ok) throw new Error(await res.text());
+    favs = new Set(await res.json());
+    if (!favs.size) state.instr.delete(FAVS);
+    populateFilters();
+    render();
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+}
+
 // The filter bar shows the "Filters" button (with the active count) and one
 // removable chip per active filter, so what's applied is always visible.
 function updateFilterBar() {
@@ -725,6 +774,7 @@ function updateFilterBar() {
     ...[...state.cats].map(v => ({ kind: "cats", v, label: v })),
     ...[...state.pilates].map(v => ({ kind: "pilates", v, label: v })),
     ...(state.club ? [{ kind: "club", v: state.club, label: shortClub(state.club) }] : []),
+    ...[...state.instr].map(v => ({ kind: "instr", v, label: v === FAVS ? t("filter.favs") : v })),
   ];
   const fb = $("#filterBtn");
   fb.classList.toggle("on", active.length > 0);
@@ -741,7 +791,7 @@ function removeFilter(kind, v) {
 }
 
 function clearFilters() {
-  state.cats.clear(); state.pilates.clear(); setClub("");
+  state.cats.clear(); state.pilates.clear(); state.instr.clear(); setClub("");
   populateFilters();
   render();
 }
@@ -751,7 +801,8 @@ function filteredClasses() {
     (!state.date || c.date === state.date) &&
     (!state.cats.size || state.cats.has(classCategory(c.name))) &&
     (!state.pilates.size || classCategory(c.name) !== "Pilates" || state.pilates.has(pilatesType(c.name))) &&
-    (!state.club || c.club === state.club));
+    (!state.club || c.club === state.club) &&
+    (!state.instr.size || instructorsOf(c).some(i => state.instr.has(i)) || (state.instr.has(FAVS) && hasFav(c))));
 }
 
 function render() {
@@ -803,7 +854,7 @@ function rowHead(c) {
   return `<div class="ctime"><span class="s">${c.start}</span>${mins > 0 ? `<span class="e">${t("duration", mins)}</span>` : ""}</div>
     <div class="cmain">
       <div class="cname" style="--c:${st.color}">${icon(st.icon)}<span>${esc(c.name)}</span></div>
-      <div class="csub">${esc(shortClub(c.club))}${c.instructor ? ` · ${esc(c.instructor)}` : ""}</div>${
+      <div class="csub">${esc(shortClub(c.club))}${c.instructor ? ` · ${hasFav(c) ? `<span class="fav-i">${icon("i-star")}</span>` : ""}${esc(c.instructor)}` : ""}</div>${
       c.booked ? `<div class="cbk">${icon("i-check")}${t("row.booked")}</div>`
       : c.waitlisted ? `<div class="cwl">${icon("i-hourglass")}${t("row.waitlisted", c.waitlistPos)}</div>`
       : c.watched ? `<div class="cwatch">${icon("i-eye")}${t("row.watching")}</div>`
@@ -1195,8 +1246,10 @@ $("#dayStrip").addEventListener("click", e => {
 });
 // Filter sheet chips: Class/Pilates are cumulative multi-select ("All" clears),
 // Club is single-select. The list updates live behind the sheet.
-[["#classChips", "cats"], ["#pilatesChips", "pilates"], ["#clubChips", "club"]].forEach(([sel, key]) =>
+[["#classChips", "cats"], ["#pilatesChips", "pilates"], ["#clubChips", "club"], ["#instrChips", "instr"]].forEach(([sel, key]) =>
   $(sel).addEventListener("click", e => {
+    const star = e.target.closest(".star");
+    if (star) return toggleFav(star.dataset.fav);
     const chip = e.target.closest(".chip"); if (!chip) return;
     const val = chip.dataset.val;
     if (key === "club") setClub(val);
