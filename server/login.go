@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -128,22 +129,47 @@ func (s *sessions) destroy(tok string) {
 // handleLogin validates the credentials against Virgin, materializes the user and
 // opens a session.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// Two shapes: a JSON POST (API) and a native HTML form POST, which the web app
+	// uses because only a real form submission followed by a navigation makes
+	// browsers (iOS Safari above all) offer to save the password. The form gets a
+	// redirect instead of JSON: to / on success, back with ?loginError on failure.
+	form := strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded")
+	fail := func(code int, msg string) {
+		if form {
+			http.Redirect(w, r, "/?loginError="+url.QueryEscape(msg), http.StatusSeeOther)
+			return
+		}
+		w.WriteHeader(code)
+		writeJSON(w, map[string]any{"ok": false, "error": msg})
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if form && !sameOrigin(r) { // a form can be posted from any site: no login CSRF
+		http.Error(w, "cross-origin login refused", http.StatusForbidden)
+		return
+	}
 	if !s.sess.allow(clientIP(r)) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		writeJSON(w, map[string]any{"ok": false, "error": "too many attempts, wait a few minutes"})
+		fail(http.StatusTooManyRequests, "too many attempts, wait a few minutes")
 		return
 	}
 	var req struct {
 		Email string `json:"email"`
 		Pass  string `json:"pass"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if form {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		req.Email, req.Pass = strings.TrimSpace(r.PostForm.Get("username")), r.PostForm.Get("password")
+	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 	if !emailAllowed(req.Email) {
-		w.WriteHeader(http.StatusForbidden)
-		writeJSON(w, map[string]any{"ok": false, "error": "this account isn't allowed on this server"})
+		fail(http.StatusForbidden, "this account isn't allowed on this server")
 		return
 	}
 	userID, err := s.auth.Login(req.Email, req.Pass)
@@ -151,8 +177,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		code, msg := loginFailure(err)
 		// Never log the password; the raw error carries Virgin's status and body.
 		log.Printf("login failed for %s: HTTP %d: %v", req.Email, code, err)
-		w.WriteHeader(code)
-		writeJSON(w, map[string]any{"ok": false, "error": msg})
+		fail(code, msg)
 		return
 	}
 	tok := s.sess.create(userID)
@@ -163,7 +188,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.InvalidateUser(userID) // reload the calendar with the authenticated session
 	go s.syncMember(userID)
+	if form {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true, "email": req.Email})
+}
+
+// sameOrigin reports whether a browser request comes from this site: the Origin
+// header (sent on every cross-site POST) must match the host. A missing Origin
+// (old browsers, non-browser clients) is let through.
+func sameOrigin(r *http.Request) bool {
+	o := r.Header.Get("Origin")
+	if o == "" {
+		return true
+	}
+	u, err := url.Parse(o)
+	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
 
 // loginFailure maps a login error to the HTTP code and the message shown to the

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,5 +69,33 @@ func TestSessionPersistsAndRenews(t *testing.T) {
 	s.db.Exec(`UPDATE sessions SET created = ? WHERE token = ?`, time.Now().Add(-sessionTTL-time.Hour).Format(time.RFC3339), tok)
 	if _, ok := s.sess.valid(tok); ok {
 		t.Fatal("30 days without opening the app still expires the session")
+	}
+}
+
+// The web app logs in with a native form POST (so browsers offer to save the
+// password): failures redirect back with the reason, and a form posted from
+// another site is refused.
+func TestFormLogin(t *testing.T) {
+	s := testServer(t)
+	s.sess = newSessions(s.db)
+	s.auth = NewAuth(s.accounts, "test-key")
+	t.Setenv("VA_ALLOWED_EMAILS", "friend@x")
+	post := func(origin string) *httptest.ResponseRecorder {
+		body := url.Values{"username": {"stranger@x"}, "password": {"pw"}}.Encode()
+		req := httptest.NewRequest(http.MethodPost, "http://virginbot.test/api/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		s.handleLogin(rec, req)
+		return rec
+	}
+	rec := post("http://virginbot.test")
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/?loginError=") {
+		t.Fatalf("a failed form login must redirect back with the reason: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec := post("https://evil.example"); rec.Code != http.StatusForbidden {
+		t.Fatalf("a cross-site form login must be refused, got %d", rec.Code)
 	}
 }

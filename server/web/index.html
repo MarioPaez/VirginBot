@@ -389,12 +389,12 @@
       <option value="it">Italiano</option><option value="es">Español</option><option value="en">English</option>
     </select>
   </label>
-  <form class="login-card" onsubmit="doLogin(event)">
+  <form class="login-card" method="post" action="/api/login" onsubmit="doLogin()">
     <img src="/logo.svg" class="logo-lg" alt="">
     <h2>Virgin<span>Bot</span></h2>
     <p class="login-sub" data-i18n="login.sub">Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.</p>
     <div class="field"><label for="li-email" data-i18n="login.email">email</label>
-      <input id="li-email" name="username" type="email" autocomplete="username" inputmode="email" required></div>
+      <input id="li-email" name="username" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required></div>
     <div class="field"><label for="li-pass" data-i18n="login.pass">password</label>
       <input id="li-pass" name="password" type="password" autocomplete="current-password" required></div>
     <button type="submit" class="btn btn-primary btn-block" id="li-btn" data-i18n="login.submit">Sign in</button>
@@ -1430,36 +1430,31 @@ async function init() {
         document.querySelector(`.nav button[data-view="${CSS.escape(view)}"]`)?.click();
         history.replaceState(null, "", "/");
       }
-    } else showLogin();
+    } else {
+      showLogin();
+      // Failed form login: the server redirected back with the reason.
+      const err = new URLSearchParams(location.search).get("loginError");
+      if (err) {
+        $("#li-err").textContent = err;
+        try { $("#li-email").value = sessionStorage.getItem("loginEmail") || ""; } catch (e) {}
+        $("#li-pass").focus();
+        history.replaceState(null, "", "/");
+      }
+    }
   } catch (e) { showLogin(); }
 }
 
-async function doLogin(e) {
-  e.preventDefault();
-  const btn = $("#li-btn");
-  btn.disabled = true;
+// doLogin lets the form submit natively (POST /api/login → redirect): only a
+// real form submission followed by a navigation makes Safari/iOS (and the other
+// browsers) offer to save the password in the keychain. The server redirects
+// back with ?loginError=… on failure.
+// Back/forward cache: a page restored after submitting must not keep the button disabled.
+window.addEventListener("pageshow", () => { $("#li-btn").disabled = false; });
+
+function doLogin() {
+  try { sessionStorage.setItem("loginEmail", $("#li-email").value); } catch (e) {}
+  $("#li-btn").disabled = true;
   $("#li-err").textContent = t("login.loading");
-  try {
-    const res = await fetch("/api/login", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: $("#li-email").value, pass: $("#li-pass").value }),
-    });
-    const d = await res.json();
-    if (d.ok) {
-      // Ask the browser to save the credentials: with a fetch()-based login
-      // there's no navigation, so without this Chrome/Edge often don't offer it.
-      if (window.PasswordCredential) {
-        try {
-          await navigator.credentials.store(new PasswordCredential({
-            id: $("#li-email").value, password: $("#li-pass").value,
-          }));
-        } catch (e) { /* unsupported or dismissed: not a problem */ }
-      }
-      $("#li-err").textContent = "";
-      await init();
-    } else $("#li-err").textContent = d.error || t("toast.error");
-  } catch (err) { $("#li-err").textContent = t("toast.error") + ": " + err; }
-  btn.disabled = false;
 }
 
 async function logout() {
