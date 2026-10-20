@@ -143,9 +143,12 @@ func (s *Store) Get(userID int64, id string) (Rule, bool) {
 	return r, true
 }
 
-// Remove deletes a user's rule by ID.
+// Remove deletes a user's rule by ID (and its skipped dates).
 func (s *Store) Remove(userID int64, id string) error {
-	_, err := s.db.Exec(`DELETE FROM automations WHERE user_id = ? AND id = ?`, userID, id)
+	if _, err := s.db.Exec(`DELETE FROM automations WHERE user_id = ? AND id = ?`, userID, id); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM skips WHERE user_id = ? AND rule_id = ?`, userID, id)
 	return err
 }
 
@@ -157,15 +160,41 @@ func (s *Store) SetEnabled(userID int64, id string, enabled bool) error {
 	return err
 }
 
-// RemoveMatching deletes the rule for the given class (when unbooking).
-func (s *Store) RemoveMatching(userID int64, name, club string, weekday int, start string) (bool, error) {
-	res, err := s.db.Exec(`DELETE FROM automations WHERE user_id = ? AND id = ?`,
-		userID, ruleKey(name, club, weekday, start))
+// Skip marks one occurrence (date) of the matching rule as not to be booked: the
+// user cancelled it, so the engine must not re-book it, but the rule keeps
+// booking the other weeks. No-op if there's no matching rule; reports whether
+// the date got marked.
+func (s *Store) Skip(userID int64, name, club string, weekday int, start, date string) (bool, error) {
+	res, err := s.db.Exec(
+		`INSERT OR IGNORE INTO skips (user_id, rule_id, date)
+		 SELECT user_id, id, ? FROM automations WHERE user_id = ? AND id = ?`,
+		date, userID, ruleKey(name, club, weekday, start))
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// Unskip undoes Skip (the user booked or automated that occurrence again).
+func (s *Store) Unskip(userID int64, name, club string, weekday int, start, date string) error {
+	_, err := s.db.Exec(`DELETE FROM skips WHERE user_id = ? AND rule_id = ? AND date = ?`,
+		userID, ruleKey(name, club, weekday, start), date)
+	return err
+}
+
+// Skipped reports whether the rule's occurrence on date was cancelled by the user.
+func (s *Store) Skipped(userID int64, ruleID, date string) bool {
+	var one int
+	err := s.db.QueryRow(`SELECT 1 FROM skips WHERE user_id = ? AND rule_id = ? AND date = ?`,
+		userID, ruleID, date).Scan(&one)
+	return err == nil
+}
+
+// PurgeSkips deletes the skipped dates before `before` (YYYY-MM-DD).
+func (s *Store) PurgeSkips(before string) error {
+	_, err := s.db.Exec(`DELETE FROM skips WHERE date < ?`, before)
+	return err
 }
 
 func boolToInt(b bool) int {

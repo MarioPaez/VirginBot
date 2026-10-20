@@ -168,6 +168,9 @@ func (e *Engine) occurrences(now time.Time) []occ {
 			if st := e.get(o.stateKey()); st != nil && st.booked {
 				continue
 			}
+			if e.store.Skipped(r.UserID, r.ID, date) { // cancelled by the user: don't re-book
+				continue
+			}
 			out = append(out, o)
 		}
 	}

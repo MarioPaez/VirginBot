@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS bookings (
     created    TEXT NOT NULL,
     PRIMARY KEY (user_id, name, club, date, start)
 );
+CREATE TABLE IF NOT EXISTS skips (
+    user_id INTEGER NOT NULL,
+    rule_id TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    PRIMARY KEY (user_id, rule_id, date)
+);
 `
 
 // Open opens (or creates) the database at `path` and applies the schema/migration.

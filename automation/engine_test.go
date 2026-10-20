@@ -201,6 +201,73 @@ func TestPausedRuleNotScheduled(t *testing.T) {
 	}
 }
 
+// Cancelling one occurrence skips only that date: the rule survives and keeps
+// scheduling the other weeks; booking it again (Unskip) re-schedules it.
+func TestSkippedOccurrenceNotScheduled(t *testing.T) {
+	loc := mustLoc(t)
+	dbh, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("open DB: %v", err)
+	}
+	defer dbh.Close()
+	store := NewStore(dbh)
+
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
+	day := now.AddDate(0, 0, 1) // tomorrow; the same weekday recurs at +8, still within the horizon
+	wd, date := int(day.Weekday()), day.Format("2006-01-02")
+	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", wd, "18:15")
+	if err != nil {
+		t.Fatalf("add rule: %v", err)
+	}
+	e := NewEngine(store, nil, nil, nil, nil)
+	e.loc = loc
+
+	has := func(d string) bool {
+		for _, o := range e.occurrences(now) {
+			if o.rule.ID == rule.ID && o.date == d {
+				return true
+			}
+		}
+		return false
+	}
+	next := day.AddDate(0, 0, 7).Format("2006-01-02")
+	if !has(date) || !has(next) {
+		t.Fatal("both weekly occurrences must be scheduled before cancelling")
+	}
+
+	if ok, err := store.Skip(7, "Calisthenics", "Milano Corso Como", wd, "18:15", date); err != nil || !ok {
+		t.Fatalf("skip must mark the date: ok=%v err=%v", ok, err)
+	}
+	if has(date) {
+		t.Fatal("a cancelled occurrence must NOT be scheduled")
+	}
+	if !has(next) {
+		t.Fatal("the following week must still be scheduled")
+	}
+	if _, ok := store.Get(7, rule.ID); !ok {
+		t.Fatal("cancelling must not delete the rule")
+	}
+
+	if err := store.Unskip(7, "Calisthenics", "Milano Corso Como", wd, "18:15", date); err != nil {
+		t.Fatalf("unskip: %v", err)
+	}
+	if !has(date) {
+		t.Fatal("unskipping must schedule the occurrence again")
+	}
+
+	// Skip without a matching rule is a no-op; past skips are purged.
+	if ok, err := store.Skip(7, "Yoga", "Milano Corso Como", wd, "18:15", date); err != nil || ok {
+		t.Fatalf("skip without a rule must be a no-op: ok=%v err=%v", ok, err)
+	}
+	store.Skip(7, "Calisthenics", "Milano Corso Como", wd, "18:15", date)
+	if err := store.PurgeSkips(next); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+	if store.Skipped(7, rule.ID, date) {
+		t.Fatal("skips before the purge date must be deleted")
+	}
+}
+
 func countOcc(occs []occ, id string) int {
 	n := 0
 	for _, o := range occs {

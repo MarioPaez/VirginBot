@@ -41,7 +41,7 @@
   .empty, .loading { color:var(--muted); padding:40px 0; text-align:center; }
   #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--card);
            border:1px solid var(--line); padding:12px 18px; border-radius:10px; opacity:0; transition:opacity .2s;
-           pointer-events:none; max-width:80vw; }
+           pointer-events:none; max-width:min(80vw, 460px); line-height:1.45; }
   #toast.show { opacity:1; }
   #toast.err { border-color:var(--red); }
   .user { display:inline-flex; align-items:center; gap:6px; color:#e9ecf1; font-size:13px;
@@ -255,6 +255,7 @@ const I18N = {
     "auto.activate": "Attiva", "auto.pause": "Pausa", "auto.remove": "Rimuovi",
     "auto.hint": "Ogni settimana provo a prenotare all'ora della lezione, da quando si aprono le prenotazioni (8 giorni prima, solarium 2) fino a 24 h prima. Metti in pausa senza perdere la configurazione e riattiva quando vuoi.",
     "toast.activated": "Attivata ✓", "toast.paused": "In pausa", "toast.booked": "Prenotata ✓", "toast.cancelled": "Annullata ✓",
+    "toast.cancelledskip": "Annullata ✓ L'automazione di %s resta attiva per le prossime settimane, ma non prenoterà quella di %s. Se vuoi andarci, prenotala tu.",
     "toast.error": "Errore", "toast.bookedbang": "Prenotata! ✓", "toast.autoadded": "Automazione aggiunta ✓", "toast.autoremoved": "Automazione rimossa",
     "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
     "login.email": "email", "login.pass": "password", "login.submit": "Entra", "login.loading": "Accesso…",
@@ -284,6 +285,7 @@ const I18N = {
     "auto.activate": "Activar", "auto.pause": "Pausar", "auto.remove": "Quitar",
     "auto.hint": "Cada semana intento reservar a la hora de la clase, desde que abre el plazo (8 días antes, solarium 2) hasta 24 h antes. Pausa una sin perder su configuración y actívala cuando quieras.",
     "toast.activated": "Activada ✓", "toast.paused": "Pausada", "toast.booked": "Reservada ✓", "toast.cancelled": "Cancelada ✓",
+    "toast.cancelledskip": "Cancelada ✓ La automatización de %s sigue activa para las próximas semanas, pero no reservará la del %s. Si quieres ir, resérvala tú.",
     "toast.error": "Error", "toast.bookedbang": "¡Reservada! ✓", "toast.autoadded": "Automatización añadida ✓", "toast.autoremoved": "Automatización quitada",
     "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
     "login.email": "email", "login.pass": "contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
@@ -313,6 +315,7 @@ const I18N = {
     "auto.activate": "Activate", "auto.pause": "Pause", "auto.remove": "Remove",
     "auto.hint": "Every week I try to book at class time, from when booking opens (8 days before, solarium 2) until 24h before. Pause one without losing its setup and turn it back on whenever you want.",
     "toast.activated": "Activated ✓", "toast.paused": "Paused", "toast.booked": "Booked ✓", "toast.cancelled": "Cancelled ✓",
+    "toast.cancelledskip": "Cancelled ✓ Your %s automation stays on for the coming weeks, but it won't book the one on %s. If you want to go, book it yourself.",
     "toast.error": "Error", "toast.bookedbang": "Booked! ✓", "toast.autoadded": "Automation added ✓", "toast.autoremoved": "Automation removed",
     "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
     "login.email": "email", "login.pass": "password", "login.submit": "Sign in", "login.loading": "Signing in…",
@@ -388,11 +391,13 @@ const weekdayOf = date => new Date(date + "T00:00:00").getDay();
 const ruleFor = c => autos.find(r =>
   r.name === c.name && r.club === c.club && r.start === c.start && r.weekday === weekdayOf(c.date));
 
-function toast(msg, isErr) {
+let toastTimer;
+function toast(msg, isErr, ms = 3500) {
   const t = $("#toast");
   t.textContent = msg;
   t.className = "show" + (isErr ? " err" : "");
-  setTimeout(() => t.className = "", 3500);
+  clearTimeout(toastTimer); // a new toast gets its full time, not the previous one's leftover
+  toastTimer = setTimeout(() => t.className = "", ms);
 }
 
 async function load() {
@@ -750,7 +755,10 @@ async function act(kind, c) {
       method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c)
     })).json();
     if (res.ok) {
-      toast(kind === "book" ? t("toast.booked") : t("toast.cancelled"));
+      if (kind === "unbook" && res.skipped) {
+        const day = new Date(c.date + "T00:00").toLocaleDateString(loc(), { weekday: "long", day: "numeric", month: "long" });
+        toast(t("toast.cancelledskip", c.name, day), false, 9000);
+      } else toast(kind === "book" ? t("toast.booked") : t("toast.cancelled"));
       if (state.view === "bookings") loadBookings(); else load();
     } else toast(res.error || t("toast.error"), true);
   } catch (e) { toast(t("toast.error") + ": " + e, true); }

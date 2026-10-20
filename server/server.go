@@ -352,6 +352,18 @@ func (s *Server) deleteBooking(userID int64, name, club, date, start string) {
 
 func (s *Server) purgePastBookings() {
 	s.db.Exec(`DELETE FROM bookings WHERE date < ?`, s.today())
+	if err := s.store.PurgeSkips(s.today()); err != nil {
+		log.Printf("purge skips: %v", err)
+	}
+}
+
+// unskip clears a cancelled-occurrence mark once the user books or automates it again.
+func (s *Server) unskip(userID int64, req bookRequest) {
+	if wd, ok := weekdayOf(req.Date); ok {
+		if err := s.store.Unskip(userID, req.Name, req.Club, wd, req.Start, req.Date); err != nil {
+			log.Printf("unskip u%d %s %s: %v", userID, req.Name, req.Date, err)
+		}
+	}
 }
 
 // listBookings returns the user's future bookings as Class values.
@@ -440,6 +452,7 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": bookErr.Error()})
 		return
 	}
+	s.unskip(userID, req)
 	s.InvalidateUser(userID)
 	writeJSON(w, map[string]any{"ok": true})
 }
@@ -474,11 +487,16 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deleteBooking(userID, req.Name, req.Club, req.Date, req.Start)
+	// Keep the (recurring) rule but don't let the engine re-book this date; the FE
+	// tells the user (skipped=true).
+	skipped := false
 	if wd, ok := weekdayOf(req.Date); ok {
-		s.store.RemoveMatching(userID, req.Name, req.Club, wd, req.Start)
+		if skipped, err = s.store.Skip(userID, req.Name, req.Club, wd, req.Start, req.Date); err != nil {
+			log.Printf("skip u%d %s %s: %v", userID, req.Name, req.Date, err)
+		}
 	}
 	s.InvalidateUser(userID)
-	writeJSON(w, map[string]any{"ok": true})
+	writeJSON(w, map[string]any{"ok": true, "skipped": skipped})
 }
 
 func decodeBook(w http.ResponseWriter, r *http.Request) (bookRequest, bool) {
@@ -524,6 +542,7 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.unskip(userID, req) // automating this occurrence again overrides a past cancellation
 		booked := s.tryBookNow(userID, req)
 		lang := s.langOf(userID)
 		if booked {
@@ -607,7 +626,7 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 		if err != nil || !start.After(now) {
 			continue
 		}
-		if s.isBooked(userID, r.Name, r.Club, date, r.Start) {
+		if s.isBooked(userID, r.Name, r.Club, date, r.Start) || s.store.Skipped(userID, r.ID, date) {
 			continue
 		}
 		// An occurrence with no fire left (inside its last 24h) gets no more
