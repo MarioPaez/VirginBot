@@ -30,6 +30,7 @@ const (
 	watchFar          = 15 * time.Minute // poll period more than a day before the class
 	watchMid          = 5 * time.Minute  // ... within the last day
 	watchNear         = 2 * time.Minute  // ... within the last 3 hours (cancellations peak)
+	watchMaxErrors    = 3                // consecutive failed bookings before giving up on a watch
 )
 
 // watchCutoff is how long before the class watching stops: booking later could
@@ -165,10 +166,11 @@ func (s *Server) handleWatches(w http.ResponseWriter, r *http.Request) {
 // the engine runs (it books for real). Never returns.
 func (s *Server) RunWatches() {
 	lastPoll := map[string]time.Time{} // club|date → last fetch
+	errs := map[string]int{}           // user|watch key → consecutive failed bookings
 	for range time.Tick(watchTick) {
 		now := time.Now().In(s.loc)
 		for _, g := range s.dueWatchGroups(now, lastPoll) {
-			s.pollWatchGroup(g.club, g.date, g.watches)
+			s.pollWatchGroup(g.club, g.date, g.watches, errs)
 		}
 	}
 }
@@ -214,7 +216,15 @@ func (s *Server) dueWatchGroups(now time.Time, lastPoll map[string]time.Time) []
 			due = append(due, g)
 		}
 	}
-	sort.Slice(due, func(i, j int) bool { return due[i].next.Before(due[j].next) })
+	// Most overdue first (so no club-day starves while nearer ones keep coming
+	// due), then the nearest class.
+	overdue := func(g *watchGroup) time.Duration { return now.Sub(lastPoll[g.club+"|"+g.date]) - g.every }
+	sort.Slice(due, func(i, j int) bool {
+		if oi, oj := overdue(due[i]), overdue(due[j]); oi != oj {
+			return oi > oj
+		}
+		return due[i].next.Before(due[j].next)
+	})
 	due = due[:min(len(due), watchPollsPerTick)]
 	for _, g := range due {
 		lastPoll[g.club+"|"+g.date] = now
@@ -236,7 +246,7 @@ func minTime(a, b time.Time) time.Time {
 
 // pollWatchGroup fetches a club's day once (with the first watcher's session)
 // and, if a watched class has a free spot, books it for its watchers in order.
-func (s *Server) pollWatchGroup(club, date string, watches []watch) {
+func (s *Server) pollWatchGroup(club, date string, watches []watch, errs map[string]int) {
 	day, err := time.ParseInLocation("2006-01-02", date, s.loc)
 	if err != nil {
 		return
@@ -271,12 +281,31 @@ func (s *Server) pollWatchGroup(club, date string, watches []watch) {
 		if len(beds) == 0 {
 			continue
 		}
-		s.grabWatched(w, beds)
+		// The bookings table may be stale (booked in the official app since):
+		// refresh it before POSTing a booking the user may already hold.
+		s.fetchBookings(w.UserID)
+		if s.isBooked(w.UserID, w.Name, w.Club, w.Date, w.Start) {
+			s.removeWatch(w.UserID, w.Name, w.Club, w.Date, w.Start)
+			continue
+		}
+		k := fmt.Sprintf("%d|%s", w.UserID, w.key())
+		if s.grabWatched(w, beds) {
+			delete(errs, k)
+			continue
+		}
+		// Virgin keeps refusing (overlapping booking, account issue…): give up
+		// and tell the user instead of POSTing until the cutoff.
+		if errs[k]++; errs[k] >= watchMaxErrors {
+			delete(errs, k)
+			s.removeWatch(w.UserID, w.Name, w.Club, w.Date, w.Start)
+			s.notifyClass(w.UserID, w.Name, w.Club, w.Date, w.Start, "/", "push.watch.failed.title")
+		}
 	}
 }
 
-// grabWatched tries the free beds for one watcher until one accepts.
-func (s *Server) grabWatched(w watch, beds []calendar.Class) {
+// grabWatched tries the free beds for one watcher until one accepts; false if
+// every booking call failed.
+func (s *Server) grabWatched(w watch, beds []calendar.Class) bool {
 	attempt := automation.Attempt{UserID: w.UserID, Name: w.Name, Club: w.Club, Date: w.Date, Start: w.Start, Source: "watch"}
 	var lastErr error
 	for _, c := range beds {
@@ -296,18 +325,19 @@ func (s *Server) grabWatched(w watch, beds []calendar.Class) {
 			attempt.Outcome, attempt.Detail = automation.OutcomeWaitlisted, fmt.Sprintf("position %d", res.Position)
 			s.store.RecordAttempt(attempt)
 			s.notifyClass(w.UserID, w.Name, w.Club, w.Date, w.Start, "/?view=bookings", "push.waitlisted.title", res.Position)
-			return
+			return true
 		}
 		log.Printf("watch: ✓ u%d %s · %s %s %s — a spot freed up: BOOKED", w.UserID, w.Name, w.Club, w.Date, w.Start)
 		attempt.Outcome = automation.OutcomeBooked
 		s.store.RecordAttempt(attempt)
 		s.MarkBotBooked(w.UserID, w.Name, w.Club, w.Date, w.Start)
 		s.notifyClass(w.UserID, w.Name, w.Club, w.Date, w.Start, "/?view=bookings", "push.watch.booked.title")
-		return
+		return true
 	}
 	log.Printf("watch: u%d %s %s %s — booking failed: %v", w.UserID, w.Name, w.Date, w.Start, lastErr)
 	attempt.Outcome, attempt.Detail = automation.OutcomeError, lastErr.Error()
 	s.store.RecordAttempt(attempt)
+	return false
 }
 
 // expireWatch ends a watch that reached its cutoff without a spot.
@@ -342,6 +372,14 @@ func (s *Server) MarkBotBooked(userID int64, name, club, date, start string) {
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO bot_bookings (user_id, name, club, date, start) VALUES (?, ?, ?, ?, ?)`,
 		userID, name, club, date, start); err != nil {
 		log.Printf("mark bot booking u%d: %v", userID, err)
+	}
+	// Booked after its reminder time (e.g. the engine's last fire at 24 h with a
+	// 24 h reminder): "still going?" right after "booked" would be noise.
+	if h := s.accounts.ReminderHours(userID); h > 0 {
+		if at, ok := s.startOf(date, start); ok && !time.Now().Before(at.Add(-time.Duration(h)*time.Hour)) {
+			s.db.Exec(`INSERT OR IGNORE INTO reminders_sent (user_id, name, club, date, start) VALUES (?, ?, ?, ?, ?)`,
+				userID, name, club, date, start)
+		}
 	}
 }
 

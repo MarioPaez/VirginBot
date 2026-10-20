@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/calendar"
 )
 
@@ -28,11 +27,7 @@ func TestDedupeSumsSpots(t *testing.T) {
 // them, with the member's own window when it's shorter than the class's.
 func TestMarkOpening(t *testing.T) {
 	s := testServer(t)
-	acc, err := account.NewStore(s.db, "test-secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.accounts = acc
+	acc := s.accounts
 	priority, _ := acc.Upsert("p@x", "pw")
 	regular, _ := acc.Upsert("r@x", "pw")
 	acc.SetMember(priority, 209, 8*24*60)

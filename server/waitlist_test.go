@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/db"
 )
@@ -17,7 +18,11 @@ func testServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { dbh.Close() })
 	loc, _ := time.LoadLocation("Europe/Rome")
-	return &Server{db: dbh, loc: loc}
+	acc, err := account.NewStore(dbh, "test-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Server{db: dbh, loc: loc, accounts: acc}
 }
 
 // Waitlist places are stored apart from bookings: they don't count as booked,

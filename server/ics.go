@@ -63,7 +63,9 @@ func (s *Server) buildICS(userID int64, now time.Time) string {
 	from := now.In(s.loc).AddDate(0, 0, -30).Format("2006-01-02")
 	rows, err := s.db.Query(`SELECT name, club, date, start, end_time, instructor FROM bookings
 		WHERE user_id = ? AND status = 'booked' AND date >= ?
-		UNION SELECT name, club, date, start, end_time, instructor FROM history
+		  AND NOT EXISTS (SELECT 1 FROM history h WHERE h.user_id = bookings.user_id AND h.name = bookings.name
+		                  AND h.club = bookings.club AND h.date = bookings.date AND h.start = bookings.start)
+		UNION ALL SELECT name, club, date, start, end_time, instructor FROM history
 		WHERE user_id = ? AND date >= ?
 		ORDER BY date, start`, userID, from, userID, from)
 	var events []icsEvent

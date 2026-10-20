@@ -156,6 +156,7 @@ func main() {
 		})
 		engine.SetOnMissed(srv.OnEngineMissed)
 		engine.SetMemberWindow(acc.WindowMin)
+		srv.SetEngineForget(engine.Forget)
 		go engine.Run(make(chan struct{}))
 		go srv.RunWatches()   // books for real too: only where the engine runs
 		go srv.RunReminders() // pushes to real devices: same

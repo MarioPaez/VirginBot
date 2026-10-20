@@ -452,6 +452,7 @@ const I18N = {
     "set.cal": "Calendario del telefono", "cal.hint": "Le tue prenotazioni nel calendario del telefono, sempre aggiornate. Il link è privato: non condividerlo.", "cal.add": "Aggiungi al calendario", "cal.copy": "Copia link", "cal.reset": "Nuovo link", "toast.copied": "Link copiato ✓", "toast.calreset": "Nuovo link creato: quello vecchio non funziona più",
     "stats.month": "Questo mese", "stats.total": "Totale", "stats.bybot": "Da VirginBot", "stats.streak": "Settimane di fila", "stats.top": "La più frequente: <b>%s</b> (%d)", "stats.since": "Dal %s",
     "filter.instructor": "Istruttore", "filter.favs": "Preferiti", "fav.hint": "Tocca la stella per segnare i tuoi istruttori preferiti.", "fav.on": "Preferito", "fav.off": "Segna come preferito",
+    "toast.oncetaken": "Questa lezione è già automatizzata solo per il %s. Scegli «Ogni settimana» per coprire entrambe.",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -493,6 +494,7 @@ const I18N = {
     "set.cal": "Calendario del móvil", "cal.hint": "Tus reservas en el calendario del móvil, siempre al día. El enlace es privado: no lo compartas.", "cal.add": "Añadir al calendario", "cal.copy": "Copiar enlace", "cal.reset": "Nuevo enlace", "toast.copied": "Enlace copiado ✓", "toast.calreset": "Nuevo enlace creado: el anterior ya no funciona",
     "stats.month": "Este mes", "stats.total": "Total", "stats.bybot": "Por VirginBot", "stats.streak": "Semanas seguidas", "stats.top": "La que más: <b>%s</b> (%d)", "stats.since": "Desde el %s",
     "filter.instructor": "Instructor", "filter.favs": "Favoritos", "fav.hint": "Toca la estrella para marcar a tus instructores favoritos.", "fav.on": "Favorito", "fav.off": "Marcar como favorito",
+    "toast.oncetaken": "Esta clase ya está automatizada solo para el %s. Elige «Cada semana» para cubrir ambas.",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -534,6 +536,7 @@ const I18N = {
     "set.cal": "Phone calendar", "cal.hint": "Your bookings in your phone's calendar, always up to date. The link is private: don't share it.", "cal.add": "Add to calendar", "cal.copy": "Copy link", "cal.reset": "New link", "toast.copied": "Link copied ✓", "toast.calreset": "New link created: the old one stopped working",
     "stats.month": "This month", "stats.total": "Total", "stats.bybot": "By VirginBot", "stats.streak": "Week streak", "stats.top": "Most frequent: <b>%s</b> (%d)", "stats.since": "Since %s",
     "filter.instructor": "Instructor", "filter.favs": "Favourites", "fav.hint": "Tap the star to mark your favourite instructors.", "fav.on": "Favourite", "fav.off": "Mark as favourite",
+    "toast.oncetaken": "This class is already automated just for %s. Pick “Every week” to cover both.",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -1201,6 +1204,8 @@ async function toggleAuto(c, on, once = false) {
   try {
     if (on) {
       const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ ...c, once })})).json();
+      if (res.onceOn) return toast(t("toast.oncetaken", fmtItDate(res.onceOn)), true, 7000);
+      if (res.error) return toast(res.error, true);
       toast(res.booked ? t("toast.bookedbang") : res.waitlistPos ? t("toast.autowaitlisted", res.waitlistPos) : t("toast.autoadded"),
         false, res.waitlistPos ? 7000 : 3500);
       autos = (await (await fetch(`/api/automations`)).json()) || [];

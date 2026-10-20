@@ -325,6 +325,18 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	e.persist(o, st)
 }
 
+// Forget drops the state of one occurrence (memory and store), e.g. after the
+// user cancelled it: the next fire starts afresh.
+func (e *Engine) Forget(userID int64, ruleID, date string) {
+	key := fmt.Sprintf("%d|%s|%s", userID, ruleID, date)
+	e.mu.Lock()
+	delete(e.state, key)
+	e.mu.Unlock()
+	if e.store != nil {
+		e.store.deleteState(key)
+	}
+}
+
 // persist saves the occurrence's state (survives restarts and deploys).
 func (e *Engine) persist(o occ, st *occState) {
 	if e.store != nil {

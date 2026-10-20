@@ -18,11 +18,14 @@ func TestBuildICS(t *testing.T) {
 	s.reconcileBookings(2, "2026-10-21", "2026-10-21", []calendar.Class{
 		{Date: "2026-10-21", Start: "07:00", End: "08:00", Name: "Lift Club", Club: "Milano Cavour", Booked: true},
 	})
+	// Already archived (started) but still in bookings, with a changed instructor:
+	// one event, not two.
+	s.db.Exec(`INSERT INTO history (user_id, name, club, date, start, end_time, instructor) VALUES (1, 'Calisthenics, Performance', 'Milano Cavour', '2026-10-21', '18:30', '19:30', 'Old')`)
 	ics := s.buildICS(1, now)
 	for _, want := range []string{
 		"BEGIN:VCALENDAR\r\n", "END:VCALENDAR\r\n",
 		"DTSTART:20261021T163000Z\r\n", "DTEND:20261021T173000Z\r\n", // 18:30 CEST = 16:30 UTC
-		`SUMMARY:Calisthenics\, Performance`, `DESCRIPTION:Ana\; Bo`, "LOCATION:Virgin Active Milano Cavour",
+		`SUMMARY:Calisthenics\, Performance`, `DESCRIPTION:Old`, "LOCATION:Virgin Active Milano Cavour",
 	} {
 		if !strings.Contains(ics, want) {
 			t.Errorf("missing %q in:\n%s", want, ics)

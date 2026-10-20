@@ -8,7 +8,7 @@ import (
 // reminderGrace: a reminder is only sent close to its due time. A class booked
 // after that moment (e.g. booked 1 h before with a 12 h lead) gets none: being
 // asked "still going?" right after booking would be noise.
-const reminderGrace = 15 * time.Minute
+const reminderGrace = 3 * time.Minute // a couple of ticks of slack
 
 // RunReminders pushes "still going?" the user's chosen hours before each booked
 // class, so they cancel in time and free the spot. Never returns.

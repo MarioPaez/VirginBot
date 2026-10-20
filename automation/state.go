@@ -48,6 +48,12 @@ func (s *Store) saveState(key, date string, st occState) {
 	}
 }
 
+func (s *Store) deleteState(key string) {
+	if _, err := s.db.Exec(`DELETE FROM engine_state WHERE key = ?`, key); err != nil {
+		log.Printf("delete engine state %s: %v", key, err)
+	}
+}
+
 // Attempt is one booking attempt (an engine fire or a watch grab), for the admin
 // view and the health checks.
 type Attempt struct {
@@ -108,11 +114,12 @@ func (s *Store) RecentAttempts(limit int) []Attempt {
 	return out
 }
 
-// OutcomesSince counts the attempts per outcome since t (health checks).
-func (s *Store) OutcomesSince(t time.Time) map[string]int {
+// OutcomesSince counts the attempts per outcome since t, of one source
+// ("engine", "watch") or all ("").
+func (s *Store) OutcomesSince(t time.Time, source string) map[string]int {
 	out := map[string]int{}
-	rows, err := s.db.Query(`SELECT outcome, COUNT(*) FROM engine_attempts WHERE ts >= ? GROUP BY outcome`,
-		t.UTC().Format(time.RFC3339))
+	rows, err := s.db.Query(`SELECT outcome, COUNT(*) FROM engine_attempts WHERE ts >= ? AND (? = '' OR source = ?) GROUP BY outcome`,
+		t.UTC().Format(time.RFC3339), source, source)
 	if err != nil {
 		return out
 	}

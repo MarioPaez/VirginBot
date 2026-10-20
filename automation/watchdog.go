@@ -39,7 +39,7 @@ func healthProblem(e *Engine, now time.Time) string {
 	if e.store == nil {
 		return ""
 	}
-	o := e.store.OutcomesSince(now.Add(-time.Hour))
+	o := e.store.OutcomesSince(now.Add(-time.Hour), "engine") // a failing watch isn't the engine
 	if o[OutcomeError] >= errorSpikeCount && o[OutcomeBooked] == 0 {
 		return fmt.Sprintf("%d intentos de reserva con error en la última hora y ninguna reserva.", o[OutcomeError])
 	}

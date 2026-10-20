@@ -160,3 +160,23 @@ func TestMemberWindowShortensTriggers(t *testing.T) {
 		}
 	}
 }
+
+// Forget resets a cancelled occurrence: a persisted "booked" must not stop the
+// engine from booking it again.
+func TestForgetResetsOccurrence(t *testing.T) {
+	loc := mustLoc(t)
+	store := testStore(t)
+	o := sampleOcc(loc)
+	var books int
+	e := NewEngine(store, fullClass("bookable"), func(int64, int, int, int, string) error { books++; return nil }, nil)
+	e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
+	e.maybeFire(o, time.Date(2026, 6, 23, 18, 15, 1, 0, loc))
+	e.Forget(o.rule.UserID, o.rule.ID, o.date)
+	if len(store.loadStates("2026-06-01")) != 0 || e.get(o.stateKey()) != nil {
+		t.Fatal("Forget must drop the state from memory and the store")
+	}
+	e.maybeFire(o, time.Date(2026, 6, 24, 18, 15, 1, 0, loc))
+	if books != 2 {
+		t.Fatalf("after Forget the next fire books again; books=%d", books)
+	}
+}

@@ -49,7 +49,8 @@ type Server struct {
 	sess     *sessions
 	push     *push.Notifier // nil = Web Push disabled
 
-	engineCycle func() time.Time // engine's last completed cycle (admin health); nil = engine off
+	engineCycle  func() time.Time                        // engine's last completed cycle (admin health); nil = engine off
+	engineForget func(userID int64, ruleID, date string) // drops the engine's state of an occurrence; nil = engine off
 
 	mu      sync.Mutex
 	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
@@ -715,6 +716,7 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deleteBooking(userID, req.Name, req.Club, req.Date, req.Start)
+	s.forgetEngineState(userID, req)
 	// Keep the (recurring) rule but don't let the engine re-book this date; the FE
 	// tells the user (skipped=true). A one-off rule for this date has nothing
 	// left to do: it goes.
@@ -773,6 +775,13 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		once := ""
 		if req.Once {
 			once = req.Date
+		}
+		// A class has one rule: a second one-off date would silently replace the
+		// first, so it's refused (switching to every week covers both).
+		if prev, found := s.store.Find(userID, req.Name, req.Club, wd, req.Start); found && once != "" && prev.Once != "" && prev.Once != once {
+			w.WriteHeader(http.StatusConflict)
+			writeJSON(w, map[string]any{"error": "already automated once on " + prev.Once + ": choose every week instead", "onceOn": prev.Once})
+			return
 		}
 		rule, err := s.store.Add(userID, req.Name, req.Club, wd, req.Start, once)
 		if err != nil {
