@@ -123,7 +123,13 @@ func main() {
 		srv.InvalidateUser(userID)
 		return bookErr
 	}, notifyUser, acc.Lang)
-	go engine.Run(make(chan struct{}))
+	// VIRGINBOT_NO_ENGINE=1 (local UI work against the real accounts): don't run
+	// the engine, or it would book alongside production.
+	if os.Getenv("VIRGINBOT_NO_ENGINE") == "1" {
+		log.Println("automation engine DISABLED (VIRGINBOT_NO_ENGINE=1)")
+	} else {
+		go engine.Run(make(chan struct{}))
+	}
 
 	log.Printf("API listening on http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, srv.Routes()); err != nil {
