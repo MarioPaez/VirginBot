@@ -43,7 +43,9 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 
 **Everything else**
 - **Who's going:** see which other users have booked the same class, so you can go together.
+- **Push notifications:** install the app on your phone's home screen, turn notifications on in the account sheet, and you get an instant "Booked ✓" or "Couldn't book" on the lock screen. Tapping it opens the right tab. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
 - **Email notifications:** automation added or removed, class booked, booking failed after the last attempt.
+- **Installable app:** add it to the home screen for a full-screen app with its own icon that opens instantly.
 - **Multi-user:** an email allowlist, Virgin passwords encrypted at rest, and per-user sessions.
 - **Admin view:** see, pause and remove every user's automations, and see everyone's upcoming bookings.
 - **Three languages:** the web app and emails are in Italian, Spanish and English, detected from the browser and changeable at any time.
@@ -106,6 +108,8 @@ All settings come from environment variables. The `.env` file is loaded at start
 | `VA_ADMIN_EMAIL` | | Admin user: Admin tab, plus an email if Virgin rejects the app credentials. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | | Email notifications. Disabled if host, user or password is missing. |
 | `SMTP_TO` | | Send every notification to this address instead of each user's (for testing). |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | | Web Push key pair. Generate it once with `go run . vapid`. Push is disabled without it. |
+| `VAPID_SUBJECT` | | Contact for push services (`mailto:` or `https:`). Default: `mailto:` + `VA_ADMIN_EMAIL`. |
 | `VA_EMAIL`, `VA_PASS` | | Seed the first user when the database is empty. |
 | `ADDR` | | Listen address. Default `:8080`. |
 | `VIRGINBOT_DB` | | SQLite file. Default `virginbot.db`. |
@@ -121,6 +125,7 @@ The repo includes a multi-stage `Dockerfile` (distroless image, static binary wi
 fly apps create <name>
 fly volumes create virginbot_data --region fra --size 1 -a <name>
 fly secrets set -a <name> APP_SECRET=... VA_API_KEY=... VA_ALLOWED_EMAILS=... VA_ADMIN_EMAIL=... SMTP_HOST=...
+fly secrets set -a <name> $(go run . vapid | tr '\n' ' ')   # push keys, never printed
 fly deploy -a <name>
 ```
 
@@ -156,6 +161,7 @@ Pure Go with a single dependency tree and no CGO: SQLite via `modernc.org/sqlite
 | `db/` | SQLite schema and idempotent migrations. |
 | `i18n/` | Dates and email text in it/es/en. |
 | `notification/` | SMTP email. |
+| `push/` | Web Push: payload encryption (RFC 8291), VAPID (RFC 8292) and per-device subscriptions. Standard library only. |
 
 ## Motivation
 

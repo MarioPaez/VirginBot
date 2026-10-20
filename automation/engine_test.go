@@ -86,6 +86,32 @@ func TestFiresAtClassHourNotBefore(t *testing.T) {
 	}
 }
 
+// A successful booking also pushes a short notice (title + class line + the
+// bookings page) to the user's devices when push is set.
+func TestPushOnBooked(t *testing.T) {
+	loc := mustLoc(t)
+	o := sampleOcc(loc)
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
+		return []calendar.Class{{
+			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
+		}}, nil
+	}
+	book := func(int64, int, int, int, string) error { return nil }
+	e := NewEngine(nil, fetch, book, nil, func(int64) string { return "es" })
+	e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
+	var got []string
+	e.SetPush(func(userID int64, title, body, url string) { got = append(got, title, body, url) })
+
+	e.maybeFire(o, time.Date(2026, 6, 23, 18, 15, 1, 0, loc))
+	if len(got) != 3 {
+		t.Fatalf("expected one push, got %v", got)
+	}
+	if got[0] != "Reservada ✓" || !strings.HasPrefix(got[1], "Calisthenics · Milano Corso Como · ") || got[2] != "/?view=bookings" {
+		t.Fatalf("unexpected push %q", got)
+	}
+}
+
 func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	loc := mustLoc(t)
 	o := sampleOcc(loc)

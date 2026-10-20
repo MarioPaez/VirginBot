@@ -199,6 +199,12 @@
   .acct .em { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .acct .st { color:var(--muted); font-size:13px; display:flex; align-items:center; gap:6px; }
   .acct .st::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--ok); }
+  .pushbox { display:grid; gap:10px; padding:12px; border-radius:14px; background:var(--surface-2); }
+  .pushbox p { margin:0; color:var(--muted); font-size:13.5px; line-height:1.5; }
+  .pushbox .on { display:flex; align-items:center; gap:6px; color:#86efac; font-weight:600; font-size:14px; }
+  .pushbox .on svg.i { width:16px; height:16px; stroke-width:2.6; }
+  .pushbox .row { display:flex; gap:8px; }
+  .pushbox .row .btn { flex:1; }
   .seg { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:4px; border-radius:12px; background:var(--surface-2); }
   .seg button { height:36px; border:none; border-radius:9px; background:transparent; color:var(--muted); font-weight:600; cursor:pointer; }
   .seg button.active { background:var(--text); color:var(--bg); }
@@ -253,7 +259,7 @@
   <div class="top">
     <img src="/logo.svg" class="logo" alt="">
     <h1 class="brand">Virgin<span>Bot</span></h1>
-    <button class="avatar" id="avatar" onclick="openSheet('acctSheet')" data-i18n-title="menu.account"></button>
+    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush()" data-i18n-title="menu.account"></button>
   </div>
   <div class="toolbar" id="controls">
     <div class="toolrow">
@@ -287,6 +293,7 @@
   <div class="grab"></div>
   <div class="acct"><div class="avatar" id="avatarLg"></div>
     <div style="min-width:0"><div class="em" id="user"></div><div class="st" data-i18n="header.session">Signed in</div></div></div>
+  <div class="sec" id="pushSec" style="display:none"><p class="sec-t" data-i18n="menu.notifications">Notifications</p><div class="pushbox" id="pushBox"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="menu.language">Language</p><div class="seg langseg"></div></div>
   <div class="sec"><button class="btn btn-block btn-danger" onclick="logout()"><svg class="i"><use href="#i-logout"/></svg><span data-i18n="action.logout">Log out</span></button></div>
 </div>
@@ -375,6 +382,7 @@ const I18N = {
     "toast.activated": "Attivata ✓", "toast.paused": "In pausa", "toast.booked": "Prenotata ✓", "toast.cancelled": "Annullata ✓",
     "toast.cancelledskip": "Annullata ✓ L'automazione di %s resta attiva per le prossime settimane, ma non prenoterà quella di %s. Se vuoi andarci, prenotala tu.",
     "toast.error": "Errore", "toast.bookedbang": "Prenotata! ✓", "toast.autoadded": "Automazione aggiunta ✓", "toast.autoremoved": "Automazione rimossa",
+    "menu.notifications": "Notifiche", "push.hint": "Ti avviso all'istante quando prenoto una lezione o non trovo posto.", "push.enable": "Attiva notifiche", "push.on": "Attive su questo dispositivo", "push.test": "Invia una prova", "push.disable": "Disattiva", "push.ios": "Per ricevere notifiche sull'iPhone, aggiungi VirginBot alla schermata Home e aprila da lì.", "push.denied": "Le notifiche sono bloccate per VirginBot nelle impostazioni del dispositivo.", "push.unsupported": "Questo browser non supporta le notifiche.", "toast.push.on": "Notifiche attivate ✓", "toast.push.off": "Notifiche disattivate", "toast.push.test": "Prova inviata",
     "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Entra", "login.loading": "Accesso…",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
@@ -406,6 +414,7 @@ const I18N = {
     "toast.activated": "Activada ✓", "toast.paused": "Pausada", "toast.booked": "Reservada ✓", "toast.cancelled": "Cancelada ✓",
     "toast.cancelledskip": "Cancelada ✓ La automatización de %s sigue activa para las próximas semanas, pero no reservará la del %s. Si quieres ir, resérvala tú.",
     "toast.error": "Error", "toast.bookedbang": "¡Reservada! ✓", "toast.autoadded": "Automatización añadida ✓", "toast.autoremoved": "Automatización quitada",
+    "menu.notifications": "Notificaciones", "push.hint": "Te aviso al instante cuando reserve una clase o no consiga plaza.", "push.enable": "Activar notificaciones", "push.on": "Activadas en este dispositivo", "push.test": "Enviar prueba", "push.disable": "Desactivar", "push.ios": "Para recibir notificaciones en el iPhone, añade VirginBot a la pantalla de inicio y ábrela desde ahí.", "push.denied": "Las notificaciones están bloqueadas para VirginBot en los ajustes del dispositivo.", "push.unsupported": "Este navegador no admite notificaciones.", "toast.push.on": "Notificaciones activadas ✓", "toast.push.off": "Notificaciones desactivadas", "toast.push.test": "Prueba enviada",
     "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
     "login.email": "Email", "login.pass": "Contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
@@ -437,6 +446,7 @@ const I18N = {
     "toast.activated": "Activated ✓", "toast.paused": "Paused", "toast.booked": "Booked ✓", "toast.cancelled": "Cancelled ✓",
     "toast.cancelledskip": "Cancelled ✓ Your %s automation stays on for the coming weeks, but it won't book the one on %s. If you want to go, book it yourself.",
     "toast.error": "Error", "toast.bookedbang": "Booked! ✓", "toast.autoadded": "Automation added ✓", "toast.autoremoved": "Automation removed",
+    "menu.notifications": "Notifications", "push.hint": "I'll tell you instantly when I book a class or can't get a spot.", "push.enable": "Turn on notifications", "push.on": "On for this device", "push.test": "Send a test", "push.disable": "Turn off", "push.ios": "To get notifications on iPhone, add VirginBot to your Home Screen and open it from there.", "push.denied": "Notifications are blocked for VirginBot in your device settings.", "push.unsupported": "This browser doesn't support notifications.", "toast.push.on": "Notifications on ✓", "toast.push.off": "Notifications off", "toast.push.test": "Test sent",
     "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Sign in", "login.loading": "Signing in…",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
@@ -482,6 +492,7 @@ async function setLang(v) {
   fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for emails)
   applyI18n();
   if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
+  if ($("#acctSheet").classList.contains("open")) renderPush();
   populateFilters();
   render();
 }
@@ -1033,6 +1044,12 @@ async function init() {
       $("#avatar").textContent = $("#avatarLg").textContent = (myEmail[0] || "?").toUpperCase();
       if (me.isAdmin) $("#adminTab").style.display = "";
       showApp(); load();
+      // Deep link from a notification (?view=bookings): open that tab, then clean the URL.
+      const view = new URLSearchParams(location.search).get("view");
+      if (view) {
+        document.querySelector(`.nav button[data-view="${CSS.escape(view)}"]`)?.click();
+        history.replaceState(null, "", "/");
+      }
     } else showLogin();
   } catch (e) { showLogin(); }
 }
@@ -1066,8 +1083,88 @@ async function doLogin(e) {
 }
 
 async function logout() {
+  // This device stops getting the user's notifications (someone else may sign in here).
+  try {
+    const sub = await currentSub();
+    if (sub) {
+      await fetch("/api/push/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+      await sub.unsubscribe();
+    }
+  } catch (e) { /* best-effort */ }
   await fetch("/api/logout", { method: "POST" });
   location.reload();
+}
+
+// ---- push notifications (account sheet) ----
+let pushInfo = null; // GET /api/push: {enabled, publicKey, devices}
+
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+async function currentSub() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+
+// renderPush paints the Notifications box for this device's real state.
+async function renderPush() {
+  try { pushInfo = await (await fetch("/api/push")).json(); } catch (e) { pushInfo = null; }
+  $("#pushSec").style.display = pushInfo && pushInfo.enabled ? "" : "none";
+  if (!pushInfo || !pushInfo.enabled) return;
+  const box = $("#pushBox");
+  if (!pushSupported()) {
+    box.innerHTML = `<p>${t(isIOS() && !isStandalone() ? "push.ios" : "push.unsupported")}</p>`;
+    return;
+  }
+  if (Notification.permission === "denied") {
+    box.innerHTML = `<p>${t("push.denied")}</p>`;
+    return;
+  }
+  if (await currentSub()) {
+    box.innerHTML = `<div class="on">${icon("i-check")}${t("push.on")}</div>
+      <div class="row"><button class="btn" onclick="testPush()">${t("push.test")}</button>
+      <button class="btn btn-danger" onclick="disablePush()">${t("push.disable")}</button></div>`;
+  } else {
+    box.innerHTML = `<p>${t("push.hint")}</p>
+      <button class="btn btn-primary btn-block" onclick="enablePush()">${t("push.enable")}</button>`;
+  }
+}
+
+const b64ToBytes = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(s.length / 4) * 4, "=")), c => c.charCodeAt(0));
+
+// enablePush must run straight from a tap: iOS only shows the permission prompt then.
+async function enablePush() {
+  try {
+    if (await Notification.requestPermission() !== "granted") return renderPush();
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(pushInfo.publicKey) });
+    const res = await (await fetch("/api/push/subscribe", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub.toJSON()),
+    })).json();
+    if (!res.ok) throw new Error(res.error || "subscribe");
+    toast(t("toast.push.on"));
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+  renderPush();
+}
+
+async function disablePush() {
+  try {
+    const sub = await currentSub();
+    if (sub) {
+      await fetch("/api/push/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+      await sub.unsubscribe();
+    }
+    toast(t("toast.push.off"));
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+  renderPush();
+}
+
+async function testPush() {
+  try {
+    const res = await (await fetch("/api/push/test", { method: "POST" })).json();
+    toast(res.ok ? t("toast.push.test") : t("toast.error"), !res.ok);
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
 }
 
 init();

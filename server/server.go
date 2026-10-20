@@ -21,6 +21,7 @@ import (
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/i18n"
 	"github.com/MarioPaez/VirginBot/notification"
+	"github.com/MarioPaez/VirginBot/push"
 	"github.com/MarioPaez/VirginBot/vapi"
 )
 
@@ -47,6 +48,7 @@ type Server struct {
 	loc      *time.Location
 	sess     *sessions
 	sender   notification.Sender
+	push     *push.Notifier // nil = Web Push disabled
 
 	mu      sync.Mutex
 	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
@@ -109,6 +111,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/unbook", s.requireSession(s.handleUnbook))
 	mux.HandleFunc("/api/automations", s.requireSession(s.handleAutomations))
 	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
+	mux.HandleFunc("/api/push", s.requireSession(s.handlePush))
+	mux.HandleFunc("/api/push/subscribe", s.requireSession(s.handlePushSubscribe))
+	mux.HandleFunc("/api/push/unsubscribe", s.requireSession(s.handlePushUnsubscribe))
+	mux.HandleFunc("/api/push/test", s.requireSession(s.handlePushTest))
 	mux.HandleFunc("/api/admin/users", s.requireAdmin(s.handleAdminUsers))
 	mux.HandleFunc("/api/admin/automations", s.requireAdmin(s.handleAdminAutomations))
 	mux.HandleFunc("/api/admin/bookings", s.requireAdmin(s.handleAdminBookings))

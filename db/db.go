@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS bookings (
     created    TEXT NOT NULL,
     PRIMARY KEY (user_id, name, club, date, start)
 );
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    user_id  INTEGER NOT NULL,
+    p256dh   TEXT NOT NULL,
+    auth     TEXT NOT NULL,
+    created  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS skips (
     user_id INTEGER NOT NULL,
     rule_id TEXT NOT NULL,

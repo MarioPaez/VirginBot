@@ -38,7 +38,8 @@ type Engine struct {
 	fetchDay func(userID int64, club, date string) ([]calendar.Class, error) // fresh fetch of a club's day (authenticated, curated)
 	book     func(userID int64, clubID, classID, sessionID int, date string) error
 	notify   func(userID int64, subject, body string)
-	lang     func(userID int64) string // user's language for emails (it/es/en); nil = Default
+	push     func(userID int64, title, body, url string) // optional (SetPush): instant notification on the user's devices
+	lang     func(userID int64) string                   // user's language for emails (it/es/en); nil = Default
 	loc      *time.Location
 	rounds   int           // attempts per fire
 	lead     time.Duration // lead after the hour before the 1st attempt
@@ -81,6 +82,20 @@ func NewEngine(
 		debug:  os.Getenv("VIRGINBOT_DEBUG") != "",
 		state:  map[string]*occState{},
 	}
+}
+
+// SetPush adds an instant (Web Push) notification for the booking outcomes, on
+// top of the email. Not set = email only.
+func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.push = fn }
+
+// pushOutcome sends the short version of a booking outcome to the user's devices.
+func (e *Engine) pushOutcome(o occ, titleKey, url string) {
+	if e.push == nil {
+		return
+	}
+	lang := e.langOf(o.rule.UserID)
+	e.push(o.rule.UserID, i18n.T(lang, titleKey),
+		i18n.T(lang, "push.class", o.rule.Name, o.rule.Club, i18n.FormatDateTime(lang, o.start)), url)
 }
 
 // envInt reads a positive integer from an environment variable, or returns def.
@@ -232,6 +247,7 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 			i18n.T(lang, "email.failed.subject", o.rule.Name),
 			i18n.T(lang, "email.failed.body",
 				classLines(lang, o.rule.Name, o.rule.Club, o.start), st.attempts, reason))
+		e.pushOutcome(o, "push.failed.title", "/?view=automations")
 	}
 }
 
@@ -403,6 +419,7 @@ func (e *Engine) notifyBooked(o occ, st *occState) {
 	}
 	body += i18n.T(lang, "email.booked.outro")
 	e.notify(o.rule.UserID, i18n.T(lang, "email.booked.subject", o.rule.Name), body)
+	e.pushOutcome(o, "push.booked.title", "/?view=bookings")
 }
 
 // ---- state ----

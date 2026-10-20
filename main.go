@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/db"
 	"github.com/MarioPaez/VirginBot/notification"
+	"github.com/MarioPaez/VirginBot/push"
 	"github.com/MarioPaez/VirginBot/server"
 	"github.com/MarioPaez/VirginBot/vapi"
 )
@@ -19,6 +22,15 @@ import (
 const defaultDBFile = "virginbot.db"
 
 func main() {
+	// `virginbot vapid` prints a fresh key pair for Web Push and exits.
+	if len(os.Args) > 1 && os.Args[1] == "vapid" {
+		pub, priv, err := push.GenerateVAPID()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("VAPID_PUBLIC_KEY=%s\nVAPID_PRIVATE_KEY=%s\n", pub, priv)
+		return
+	}
 	loadDotEnv(".env") // loads .env if present (doesn't override already-exported variables)
 
 	addr := os.Getenv("ADDR")
@@ -123,6 +135,14 @@ func main() {
 		srv.InvalidateUser(userID)
 		return bookErr
 	}, notifyUser, acc.Lang)
+
+	// Web Push: the booking outcomes also reach the user's devices instantly.
+	if notifier := pushFromEnv(database); notifier != nil {
+		srv.SetPush(notifier)
+		engine.SetPush(func(userID int64, title, body, url string) {
+			go notifier.Notify(userID, push.Message{Title: title, Body: body, URL: url}) // never delay the engine
+		})
+	}
 	// VIRGINBOT_NO_ENGINE=1 (local UI work against the real accounts): don't run
 	// the engine, or it would book alongside production.
 	if os.Getenv("VIRGINBOT_NO_ENGINE") == "1" {
@@ -135,4 +155,28 @@ func main() {
 	if err := http.ListenAndServe(addr, srv.Routes()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// pushFromEnv builds the Web Push notifier from VAPID_* (generate them with
+// `virginbot vapid`), or nil if they're missing. The subject defaults to the
+// admin's email: push services use it to contact the operator.
+func pushFromEnv(database *sql.DB) *push.Notifier {
+	pub, priv := os.Getenv("VAPID_PUBLIC_KEY"), os.Getenv("VAPID_PRIVATE_KEY")
+	if pub == "" || priv == "" {
+		log.Println("push notifications disabled (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set)")
+		return nil
+	}
+	subject := os.Getenv("VAPID_SUBJECT")
+	if subject == "" {
+		if admin := strings.TrimSpace(os.Getenv("VA_ADMIN_EMAIL")); admin != "" {
+			subject = "mailto:" + admin
+		}
+	}
+	vapid, err := push.LoadVAPID(pub, priv, subject)
+	if err != nil {
+		log.Printf("push notifications disabled: %v", err)
+		return nil
+	}
+	log.Println("push notifications enabled")
+	return push.NewNotifier(database, vapid)
 }
