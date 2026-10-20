@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"time"
@@ -129,6 +130,40 @@ func (s *Store) FullAction(userID int64) string {
 func (s *Store) SetPrefs(userID int64, reminderHours int, fullAction string) error {
 	_, err := s.db.Exec(`UPDATE users SET reminder_hours = ?, full_action = ? WHERE id = ?`, reminderHours, fullAction, userID)
 	return err
+}
+
+// CalToken returns the secret of the user's private calendar feed, creating it
+// the first time.
+func (s *Store) CalToken(userID int64) (string, error) {
+	var tok string
+	if err := s.db.QueryRow(`SELECT cal_token FROM users WHERE id = ?`, userID).Scan(&tok); err != nil {
+		return "", err
+	}
+	if tok != "" {
+		return tok, nil
+	}
+	return s.RotateCalToken(userID)
+}
+
+// RotateCalToken replaces the feed's secret: the old link stops working.
+func (s *Store) RotateCalToken(userID int64) (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	tok := hex.EncodeToString(b)
+	_, err := s.db.Exec(`UPDATE users SET cal_token = ? WHERE id = ?`, tok, userID)
+	return tok, err
+}
+
+// UserByCalToken resolves a calendar feed secret to its user.
+func (s *Store) UserByCalToken(tok string) (int64, bool) {
+	if tok == "" {
+		return 0, false
+	}
+	var id int64
+	err := s.db.QueryRow(`SELECT id FROM users WHERE cal_token = ?`, tok).Scan(&id)
+	return id, err == nil
 }
 
 // ListUserIDs returns the ids of all registered users.

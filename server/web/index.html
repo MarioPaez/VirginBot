@@ -126,6 +126,7 @@
   .btn-primary:active { background:var(--accent-press); }
   .btn-danger { background:transparent; color:#f87171; }
   .btn-block { width:100%; height:48px; font-size:16px; }
+  a.btn { text-decoration:none; color:var(--text); }
   .autobtn { height:36px; padding:0 12px 0 10px; border-radius:10px; border:1px solid var(--line-2); background:transparent;
              color:var(--muted); font-size:13.5px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
   .autobtn svg.i { width:17px; height:17px; }
@@ -275,7 +276,7 @@
   <div class="top">
     <img src="/logo.svg" class="logo" alt="">
     <h1 class="brand">Virgin<span>Bot</span></h1>
-    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush(); loadSettings()" data-i18n-title="menu.account"></button>
+    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush(); loadSettings(); loadCalFeed()" data-i18n-title="menu.account"></button>
   </div>
   <div class="toolbar" id="controls">
     <div class="toolrow">
@@ -310,6 +311,7 @@
   <div class="acct"><div class="avatar" id="avatarLg"></div>
     <div style="min-width:0"><div class="em" id="user"></div><div class="st" data-i18n="header.session">Signed in</div></div></div>
   <div class="sec" id="pushSec" style="display:none"><p class="sec-t" data-i18n="menu.notifications">Notifications</p><div class="pushbox" id="pushBox"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.cal">Phone calendar</p><div class="pushbox" id="calBox"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.reminder">Reminder before each class</p><div class="chips" id="reminderChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.full">If an automation is still full 24 h before</p><div class="chips" id="fullChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="menu.language">Language</p><div class="seg langseg"></div></div>
@@ -421,6 +423,7 @@ const I18N = {
     "admin.engine": "Motore", "admin.lastcycle": "Ultimo ciclo: %s", "admin.engineoff": "Il motore non è attivo su questo server.", "admin.attempts": "Ultimi tentativi", "admin.outcome": "Esito", "admin.source": "Origine", "admin.detail": "Dettaglio", "admin.empty.attempts": "Nessun tentativo registrato.", "admin.lastday": "Ultime 24 h: %d prenotate · %d errori · %d senza posto", "outcome.booked": "Prenotata", "outcome.waitlisted": "In lista", "outcome.unavailable": "Senza posto", "outcome.error": "Errore", "outcome.missed": "Scaduta", "source.engine": "Auto", "source.watch": "Osserva",
     "action.watch": "Osserva", "watch.on.title": "La sto osservando: tocca per smettere", "watch.off.title": "Prenotala da sola se si libera un posto", "row.watching": "Osservo se si libera un posto", "toast.watching": "Ok: se si libera un posto la prenoto (fino a %d h prima)", "toast.unwatched": "Non la osservo più", "watch.section": "Osservate", "set.full": "Se un'automazione è ancora piena 24 h prima", "set.full.notify": "Avvisami", "set.full.waitlist": "Lista d'attesa", "set.full.watch": "Continua a osservare", "toast.saved": "Salvato ✓",
     "set.reminder": "Promemoria prima di ogni lezione", "set.off": "No", "set.hours": "%d h prima",
+    "set.cal": "Calendario del telefono", "cal.hint": "Le tue prenotazioni nel calendario del telefono, sempre aggiornate. Il link è privato: non condividerlo.", "cal.add": "Aggiungi al calendario", "cal.copy": "Copia link", "cal.reset": "Nuovo link", "toast.copied": "Link copiato ✓", "toast.calreset": "Nuovo link creato: quello vecchio non funziona più",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -459,6 +462,7 @@ const I18N = {
     "admin.engine": "Motor", "admin.lastcycle": "Último ciclo: %s", "admin.engineoff": "El motor no está activo en este servidor.", "admin.attempts": "Últimos intentos", "admin.outcome": "Resultado", "admin.source": "Origen", "admin.detail": "Detalle", "admin.empty.attempts": "No hay intentos registrados.", "admin.lastday": "Últimas 24 h: %d reservadas · %d errores · %d sin plaza", "outcome.booked": "Reservada", "outcome.waitlisted": "En lista", "outcome.unavailable": "Sin plaza", "outcome.error": "Error", "outcome.missed": "Expirada", "source.engine": "Auto", "source.watch": "Vigilar",
     "action.watch": "Vigilar", "watch.on.title": "La estoy vigilando: toca para dejarlo", "watch.off.title": "Resérvala sola si se libera una plaza", "row.watching": "Vigilando por si se libera una plaza", "toast.watching": "Hecho: si se libera una plaza la reservo (hasta %d h antes)", "toast.unwatched": "Ya no la vigilo", "watch.section": "Vigilando", "set.full": "Si una automatización sigue llena 24 h antes", "set.full.notify": "Avísame", "set.full.waitlist": "Lista de espera", "set.full.watch": "Seguir vigilando", "toast.saved": "Guardado ✓",
     "set.reminder": "Recordatorio antes de cada clase", "set.off": "No", "set.hours": "%d h antes",
+    "set.cal": "Calendario del móvil", "cal.hint": "Tus reservas en el calendario del móvil, siempre al día. El enlace es privado: no lo compartas.", "cal.add": "Añadir al calendario", "cal.copy": "Copiar enlace", "cal.reset": "Nuevo enlace", "toast.copied": "Enlace copiado ✓", "toast.calreset": "Nuevo enlace creado: el anterior ya no funciona",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -497,6 +501,7 @@ const I18N = {
     "admin.engine": "Engine", "admin.lastcycle": "Last cycle: %s", "admin.engineoff": "The engine isn't running on this server.", "admin.attempts": "Latest attempts", "admin.outcome": "Outcome", "admin.source": "Source", "admin.detail": "Detail", "admin.empty.attempts": "No attempts recorded.", "admin.lastday": "Last 24 h: %d booked · %d errors · %d no spot", "outcome.booked": "Booked", "outcome.waitlisted": "Waitlisted", "outcome.unavailable": "No spot", "outcome.error": "Error", "outcome.missed": "Expired", "source.engine": "Auto", "source.watch": "Watch",
     "action.watch": "Watch", "watch.on.title": "Watching it: tap to stop", "watch.off.title": "Book it on its own if a spot frees up", "row.watching": "Watching for a freed spot", "toast.watching": "Done: if a spot frees up I'll book it (until %d h before)", "toast.unwatched": "Not watching it anymore", "watch.section": "Watching", "set.full": "If an automation is still full 24 h before", "set.full.notify": "Tell me", "set.full.waitlist": "Waitlist", "set.full.watch": "Keep watching", "toast.saved": "Saved ✓",
     "set.reminder": "Reminder before each class", "set.off": "Off", "set.hours": "%d h before",
+    "set.cal": "Phone calendar", "cal.hint": "Your bookings in your phone's calendar, always up to date. The link is private: don't share it.", "cal.add": "Add to calendar", "cal.copy": "Copy link", "cal.reset": "New link", "toast.copied": "Link copied ✓", "toast.calreset": "New link created: the old one stopped working",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -540,7 +545,7 @@ async function setLang(v) {
   fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for the notifications)
   applyI18n();
   if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
-  if ($("#acctSheet").classList.contains("open")) { renderPush(); renderSettings(); }
+  if ($("#acctSheet").classList.contains("open")) { renderPush(); renderSettings(); renderCalFeed(); }
   populateFilters();
   render();
 }
@@ -1278,6 +1283,33 @@ async function saveSettings(patch) {
     renderSettings();
     toast(t("toast.saved"));
   } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+}
+
+// ---- private calendar feed (account sheet) ----
+let calPath = "";
+
+async function loadCalFeed(rotate = false) {
+  try {
+    const res = await fetch("/api/calfeed", { method: rotate ? "POST" : "GET" });
+    if (!res.ok) throw new Error(await res.text());
+    calPath = (await res.json()).path;
+    if (rotate) toast(t("toast.calreset"), false, 5000);
+  } catch (e) { calPath = ""; if (rotate) toast(t("toast.error") + ": " + e.message, true); }
+  renderCalFeed();
+}
+
+function renderCalFeed() {
+  if (!calPath) { $("#calBox").innerHTML = ""; return; }
+  // webcal:// opens the system calendar's "subscribe" dialog (iOS, macOS, most Android apps).
+  $("#calBox").innerHTML = `<p>${t("cal.hint")}</p>
+    <a class="btn btn-block" href="webcal://${location.host}${calPath}">${icon("i-cal")}${t("cal.add")}</a>
+    <div class="row"><button class="btn" onclick="copyCalLink()">${t("cal.copy")}</button>
+    <button class="btn btn-danger" onclick="loadCalFeed(true)">${t("cal.reset")}</button></div>`;
+}
+
+async function copyCalLink() {
+  try { await navigator.clipboard.writeText(location.origin + calPath); toast(t("toast.copied")); }
+  catch (e) { toast(location.origin + calPath, false, 10000); } // no clipboard access: show it to copy by hand
 }
 
 // ---- push notifications (account sheet) ----
