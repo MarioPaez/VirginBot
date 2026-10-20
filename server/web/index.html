@@ -863,12 +863,16 @@ function rowHead(c) {
       : ""}`;
 }
 
+// sharedRow: who's going to a class; if you aren't, the same actions as in the
+// calendar (book it too, automate it, watch it) from the live calendar row.
 function sharedRow(c) {
   const mine = c.users.includes(myEmail);
   const pills = c.users.map(u => u === myEmail
     ? `<span class="pill ok">${t("shared.you")}</span>`
     : `<span class="pill off">${esc(displayName(u))}</span>`).join("");
-  return `<div class="crow${mine ? " booked" : ""}">${rowHead(c)}<div class="cwho">${pills}</div></div></div>`;
+  const live = !mine && all.find(x => x.name === c.name && x.club === c.club && x.date === c.date && x.start === c.start);
+  const join = live && !live.booked ? `<div class="cact">${classActions(live)}</div>` : "";
+  return `<div class="crow${mine ? " booked" : ""}">${rowHead(c)}<div class="cwho">${pills}</div>${join}</div></div>`;
 }
 
 function renderShared() {
@@ -891,6 +895,12 @@ function dayGroup(date, inner, n) {
 const STATUS_PILL = { full: ["wait", "status.closed"], unavailable: ["off", "status.unavailable"] };
 
 function classRow(c) {
+  return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${classActions(c)}</div></div></div>`;
+}
+
+// classActions are a class's buttons: Auto, Watch (full classes) and the main
+// action or status pill.
+function classActions(c) {
   const rule = ruleFor(c);
   let right;
   if (c.booked)
@@ -912,7 +922,7 @@ function classRow(c) {
   const canWatch = !c.booked && !c.waitlisted && (c.watched || c.status === "full" || c.status === "waitlist");
   const watchBtn = canWatch ? `<button class="autobtn${c.watched ? " on" : ""}" aria-pressed="${!!c.watched}" title="${t(c.watched ? "watch.on.title" : "watch.off.title")}"
       onclick='toggleWatch(${payload(c)}, ${!c.watched})'>${icon("i-eye")}${t("action.watch")}</button>` : "";
-  return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${auto}${watchBtn}${right}</div></div></div>`;
+  return auto + watchBtn + right;
 }
 
 // statsCard summarizes the class history on top of the bookings (once there's any).
@@ -1139,6 +1149,13 @@ async function setAutoEnabled(id, enabled) {
 }
 
 // ---- actions ----
+// refreshAfterAction reloads what a booking changes in the current view.
+async function refreshAfterAction() {
+  if (state.view === "bookings") return loadBookings();
+  await load();
+  if (state.view === "shared") loadShared();
+}
+
 async function act(kind, c) {
   try {
     const res = await (await fetch(`/api/${kind}`, {
@@ -1151,7 +1168,7 @@ async function act(kind, c) {
         const day = new Date(c.date + "T00:00").toLocaleDateString(loc(), { weekday: "long", day: "numeric", month: "long" });
         toast(t("toast.cancelledskip", c.name, day), false, 9000);
       } else toast(kind === "book" ? t("toast.booked") : t("toast.cancelled"));
-      if (state.view === "bookings") loadBookings(); else load();
+      refreshAfterAction();
     } else toast(res.error || t("toast.error"), true);
   } catch (e) { toast(t("toast.error") + ": " + e, true); }
 }
@@ -1180,7 +1197,7 @@ async function toggleAuto(c, on, once = false) {
       toast(res.booked ? t("toast.bookedbang") : res.waitlistPos ? t("toast.autowaitlisted", res.waitlistPos) : t("toast.autoadded"),
         false, res.waitlistPos ? 7000 : 3500);
       autos = (await (await fetch(`/api/automations`)).json()) || [];
-      if (res.booked) { load(); return; } // reload the calendar to reflect the booking
+      if (res.booked) { refreshAfterAction(); return; } // reflect the booking
       render();
     } else {
       const rule = ruleFor(c);
