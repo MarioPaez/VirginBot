@@ -310,6 +310,7 @@
   <div class="acct"><div class="avatar" id="avatarLg"></div>
     <div style="min-width:0"><div class="em" id="user"></div><div class="st" data-i18n="header.session">Signed in</div></div></div>
   <div class="sec" id="pushSec" style="display:none"><p class="sec-t" data-i18n="menu.notifications">Notifications</p><div class="pushbox" id="pushBox"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.reminder">Reminder before each class</p><div class="chips" id="reminderChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.full">If an automation is still full 24 h before</p><div class="chips" id="fullChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="menu.language">Language</p><div class="seg langseg"></div></div>
   <div class="sec"><button class="btn btn-block btn-danger" onclick="logout()"><svg class="i"><use href="#i-logout"/></svg><span data-i18n="action.logout">Log out</span></button></div>
@@ -419,6 +420,7 @@ const I18N = {
     "autosheet.title": "Automatizza questa lezione", "autosheet.weekly": "Ogni settimana", "autosheet.weekly.sub": "Ogni %s alle %s", "autosheet.once": "Solo questa volta", "auto.onlyon": "Solo il <b>%s</b>",
     "admin.engine": "Motore", "admin.lastcycle": "Ultimo ciclo: %s", "admin.engineoff": "Il motore non è attivo su questo server.", "admin.attempts": "Ultimi tentativi", "admin.outcome": "Esito", "admin.source": "Origine", "admin.detail": "Dettaglio", "admin.empty.attempts": "Nessun tentativo registrato.", "admin.lastday": "Ultime 24 h: %d prenotate · %d errori · %d senza posto", "outcome.booked": "Prenotata", "outcome.waitlisted": "In lista", "outcome.unavailable": "Senza posto", "outcome.error": "Errore", "outcome.missed": "Scaduta", "source.engine": "Auto", "source.watch": "Osserva",
     "action.watch": "Osserva", "watch.on.title": "La sto osservando: tocca per smettere", "watch.off.title": "Prenotala da sola se si libera un posto", "row.watching": "Osservo se si libera un posto", "toast.watching": "Ok: se si libera un posto la prenoto (fino a %d h prima)", "toast.unwatched": "Non la osservo più", "watch.section": "Osservate", "set.full": "Se un'automazione è ancora piena 24 h prima", "set.full.notify": "Avvisami", "set.full.waitlist": "Lista d'attesa", "set.full.watch": "Continua a osservare", "toast.saved": "Salvato ✓",
+    "set.reminder": "Promemoria prima di ogni lezione", "set.off": "No", "set.hours": "%d h prima",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -456,6 +458,7 @@ const I18N = {
     "autosheet.title": "Automatizar esta clase", "autosheet.weekly": "Cada semana", "autosheet.weekly.sub": "Cada %s a las %s", "autosheet.once": "Solo esta vez", "auto.onlyon": "Solo el <b>%s</b>",
     "admin.engine": "Motor", "admin.lastcycle": "Último ciclo: %s", "admin.engineoff": "El motor no está activo en este servidor.", "admin.attempts": "Últimos intentos", "admin.outcome": "Resultado", "admin.source": "Origen", "admin.detail": "Detalle", "admin.empty.attempts": "No hay intentos registrados.", "admin.lastday": "Últimas 24 h: %d reservadas · %d errores · %d sin plaza", "outcome.booked": "Reservada", "outcome.waitlisted": "En lista", "outcome.unavailable": "Sin plaza", "outcome.error": "Error", "outcome.missed": "Expirada", "source.engine": "Auto", "source.watch": "Vigilar",
     "action.watch": "Vigilar", "watch.on.title": "La estoy vigilando: toca para dejarlo", "watch.off.title": "Resérvala sola si se libera una plaza", "row.watching": "Vigilando por si se libera una plaza", "toast.watching": "Hecho: si se libera una plaza la reservo (hasta %d h antes)", "toast.unwatched": "Ya no la vigilo", "watch.section": "Vigilando", "set.full": "Si una automatización sigue llena 24 h antes", "set.full.notify": "Avísame", "set.full.waitlist": "Lista de espera", "set.full.watch": "Seguir vigilando", "toast.saved": "Guardado ✓",
+    "set.reminder": "Recordatorio antes de cada clase", "set.off": "No", "set.hours": "%d h antes",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -493,6 +496,7 @@ const I18N = {
     "autosheet.title": "Automate this class", "autosheet.weekly": "Every week", "autosheet.weekly.sub": "Every %s at %s", "autosheet.once": "Just this once", "auto.onlyon": "Only on <b>%s</b>",
     "admin.engine": "Engine", "admin.lastcycle": "Last cycle: %s", "admin.engineoff": "The engine isn't running on this server.", "admin.attempts": "Latest attempts", "admin.outcome": "Outcome", "admin.source": "Source", "admin.detail": "Detail", "admin.empty.attempts": "No attempts recorded.", "admin.lastday": "Last 24 h: %d booked · %d errors · %d no spot", "outcome.booked": "Booked", "outcome.waitlisted": "Waitlisted", "outcome.unavailable": "No spot", "outcome.error": "Error", "outcome.missed": "Expired", "source.engine": "Auto", "source.watch": "Watch",
     "action.watch": "Watch", "watch.on.title": "Watching it: tap to stop", "watch.off.title": "Book it on its own if a spot frees up", "row.watching": "Watching for a freed spot", "toast.watching": "Done: if a spot frees up I'll book it (until %d h before)", "toast.unwatched": "Not watching it anymore", "watch.section": "Watching", "set.full": "If an automation is still full 24 h before", "set.full.notify": "Tell me", "set.full.waitlist": "Waitlist", "set.full.watch": "Keep watching", "toast.saved": "Saved ✓",
+    "set.reminder": "Reminder before each class", "set.off": "Off", "set.hours": "%d h before",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -1259,6 +1263,8 @@ async function loadSettings() {
 }
 
 function renderSettings() {
+  $("#reminderChips").innerHTML = [0, 2, 6, 12, 24]
+    .map(h => `<button class="chip${settings.reminderHours === h ? " active" : ""}" onclick="saveSettings({ reminderHours: ${h} })">${h ? t("set.hours", h) : t("set.off")}</button>`).join("");
   $("#fullChips").innerHTML = [["", "set.full.notify"], ["waitlist", "set.full.waitlist"], ["watch", "set.full.watch"]]
     .map(([v, k]) => `<button class="chip${settings.fullAction === v ? " active" : ""}" onclick="saveSettings({ fullAction: '${v}' })">${t(k)}</button>`).join("");
 }
