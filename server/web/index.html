@@ -289,6 +289,13 @@
   .opt b { display:block; font-size:14.5px; font-weight:600; }
   .opt small { display:block; color:var(--muted); font-size:13px; line-height:1.4; margin-top:2px; }
   .sec-hint.lead { margin:-4px 0 10px; }
+  .ccard { display:flex; gap:12px; align-items:center; margin-top:14px; padding:14px; border-radius:14px; background:var(--surface-2); }
+  .ccard .ctile { width:44px; height:44px; }
+  .ccard .t1 { font-weight:600; font-size:15.5px; }
+  .ccard .t2 { color:var(--muted); font-size:13.5px; margin-top:2px; }
+  .cnote { color:var(--muted); font-size:14px; line-height:1.5; margin:14px 0 18px; }
+  .cnote.late { color:#fcd34d; }
+  .cbtns { display:grid; gap:10px; }
   .seg { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:4px; border-radius:12px; background:var(--surface-2); }
   .seg button { height:36px; border:none; border-radius:9px; background:transparent; color:var(--muted); font-weight:600; cursor:pointer; }
   .seg button.active { background:var(--text); color:var(--bg); }
@@ -394,6 +401,12 @@
   <input class="search" id="instrSearch" type="search" autocomplete="off" data-i18n-ph="instr.search" oninput="renderInstrList()">
   <p class="sec-hint" data-i18n="fav.hint">Tap the star to mark your favourite instructors.</p>
   <div class="ilist" id="instrList"></div>
+</div>
+
+<div class="sheet" id="cancelSheet" role="dialog" aria-modal="true" aria-labelledby="cancelTitle">
+  <div class="grab"></div>
+  <h2 id="cancelTitle" data-i18n="cancel.title">Cancel this class?</h2>
+  <div id="cancelBody"></div>
 </div>
 
 <div class="sheet" id="autoSheet" role="dialog" aria-modal="true">
@@ -512,6 +525,7 @@ const I18N = {
     "toast.oncetaken": "Questa lezione è già automatizzata solo per il %s. Scegli «Ogni settimana» per coprire entrambe.",
     "set.full.hint": "Provo ogni giorno all'ora della lezione fino a 24 h prima. Se a quel punto è ancora piena:", "set.full.notify.sub": "Ti mando una notifica, nient'altro.", "set.full.waitlist.sub": "Se la lezione ha la lista d'attesa ti iscrivo: entri se qualcuno annulla.", "set.full.watch.sub": "La controllo ogni pochi minuti e la prenoto se si libera un posto, fino a %d h prima.", "instr.choose": "Scegli…", "instr.search": "Cerca istruttore", "instr.none": "Nessun istruttore trovato.", "action.done": "Fatto",
     "row.cancelby": "Annullabile fino alle %s", "row.nocancel": "Fuori tempo per annullare", "toast.overlapauto": "Non creata: si sovrappone alla tua automazione di %s · %s (%s).", "toast.overlapbook": "Si sovrappone alla tua prenotazione di %s alle %s.", "set.friends": "Amici", "set.friends.label": "Avvisami quando un amico prenota una mia lezione abituale", "set.friends.sub": "Stessa lezione e stesso club, stesso giorno e ora.", "att.title": "Ci sei andato?", "att.sub": "Le statistiche contano solo le lezioni a cui vai.", "att.yes": "Sì", "att.no": "No", "noshow.warn": "Hai saltato %d lezioni negli ultimi 30 giorni senza annullarle. Alla terza Virgin può bloccarti le prenotazioni per 15 giorni: annulla entro %d h prima.", "stats.title": "La tua attività", "stats.months": "Lezioni al mese", "stats.bytype": "Per tipo", "stats.slot": "La tua lezione: <b>%s</b> · %s %s", "suggest.text": "Vai spesso a <b>%s</b> · %s il %s alle %s (%d volte).", "suggest.auto": "Automatizza", "suggest.dismiss": "Non ora", "outcome.overlap": "Sovrapposta",
+    "cancel.title": "Annullare questa lezione?", "cancel.text": "Liberi il posto per qualcun altro e non conta come assenza. Puoi annullare fino alle %s.", "cancel.late": "Il termine per annullare è scaduto alle %s: Virgin potrebbe rifiutarla o contarla come assenza.", "cancel.yes": "Sì, annulla", "cancel.no": "No, ci vado", "cancel.gone": "Quella prenotazione non c'è più.",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -556,6 +570,7 @@ const I18N = {
     "toast.oncetaken": "Esta clase ya está automatizada solo para el %s. Elige «Cada semana» para cubrir ambas.",
     "set.full.hint": "Lo intento cada día a la hora de la clase hasta 24 h antes. Si para entonces sigue llena:", "set.full.notify.sub": "Te mando una notificación y nada más.", "set.full.waitlist.sub": "Si la clase tiene lista de espera te apunto: entras si alguien cancela.", "set.full.watch.sub": "La reviso cada pocos minutos y la reservo si se libera una plaza, hasta %d h antes.", "instr.choose": "Elegir…", "instr.search": "Buscar instructor", "instr.none": "Ningún instructor encontrado.", "action.done": "Hecho",
     "row.cancelby": "Cancelable hasta las %s", "row.nocancel": "Fuera de plazo para cancelar", "toast.overlapauto": "No creada: se solapa con tu automatización de %s · %s (%s).", "toast.overlapbook": "Se solapa con tu reserva de %s a las %s.", "set.friends": "Amigos", "set.friends.label": "Avisarme cuando un amigo reserve una de mis clases habituales", "set.friends.sub": "Misma clase y mismo gimnasio, mismo día y hora.", "att.title": "¿Fuiste?", "att.sub": "Las estadísticas solo cuentan las clases a las que vas.", "att.yes": "Sí", "att.no": "No", "noshow.warn": "Has faltado a %d clases en los últimos 30 días sin cancelarlas. A la tercera Virgin puede bloquearte las reservas 15 días: cancela hasta %d h antes.", "stats.title": "Tu actividad", "stats.months": "Clases por mes", "stats.bytype": "Por tipo", "stats.slot": "Tu clase: <b>%s</b> · %s %s", "suggest.text": "Vas mucho a <b>%s</b> · %s los %s a las %s (%d veces).", "suggest.auto": "Automatizar", "suggest.dismiss": "Ahora no", "outcome.overlap": "Solapada",
+    "cancel.title": "¿Cancelar esta clase?", "cancel.text": "Liberas la plaza para otra persona y no cuenta como falta. Puedes cancelar hasta las %s.", "cancel.late": "El plazo para cancelar terminó a las %s: Virgin puede rechazarla o contarla como falta.", "cancel.yes": "Sí, cancelar", "cancel.no": "No, voy a ir", "cancel.gone": "Esa reserva ya no está en tus reservas.",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -600,6 +615,7 @@ const I18N = {
     "toast.oncetaken": "This class is already automated just for %s. Pick “Every week” to cover both.",
     "set.full.hint": "I try every day at class time until 24 h before. If it's still full by then:", "set.full.notify.sub": "I send you a notification, nothing else.", "set.full.waitlist.sub": "If the class has a waitlist I join it: you're in if someone cancels.", "set.full.watch.sub": "I check it every few minutes and book it if a spot frees up, until %d h before.", "instr.choose": "Choose…", "instr.search": "Search instructor", "instr.none": "No instructor found.", "action.done": "Done",
     "row.cancelby": "Cancellable until %s", "row.nocancel": "Past the cancellation deadline", "toast.overlapauto": "Not created: it overlaps your %s · %s automation (%s).", "toast.overlapbook": "It overlaps your %s booking at %s.", "set.friends": "Friends", "set.friends.label": "Tell me when a friend books one of my usual classes", "set.friends.sub": "Same class and club, same weekday and time.", "att.title": "Did you go?", "att.sub": "Stats only count the classes you go to.", "att.yes": "Yes", "att.no": "No", "noshow.warn": "You skipped %d classes in the last 30 days without cancelling. At the third, Virgin may block your bookings for 15 days: cancel up to %d h before.", "stats.title": "Your activity", "stats.months": "Classes per month", "stats.bytype": "By type", "stats.slot": "Your class: <b>%s</b> · %s %s", "suggest.text": "You often go to <b>%s</b> · %s on %s at %s (%d times).", "suggest.auto": "Automate", "suggest.dismiss": "Not now", "outcome.overlap": "Overlap",
+    "cancel.title": "Cancel this class?", "cancel.text": "You free the spot for someone else and it doesn't count as a no-show. You can cancel until %s.", "cancel.late": "The cancellation deadline passed at %s: Virgin may refuse it or count it as a no-show.", "cancel.yes": "Yes, cancel", "cancel.no": "No, I'm going", "cancel.gone": "That booking isn't in your bookings anymore.",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -776,11 +792,13 @@ async function load() {
 // browser keeps it in memory (`all`); switching tabs doesn't re-request it.
 async function loadCalendar(token) {
   all = [];
-  $("#out").innerHTML = `<div class="loading">${t("loading.calendar2")}</div>`;
+  // Only the calendar view shows its spinner: the calendar also loads behind
+  // other views (a notification opening Bookings) and mustn't paint over them.
+  if (state.view === "calendar") $("#out").innerHTML = `<div class="loading">${t("loading.calendar2")}</div>`;
   const res = await fetch(`/api/calendar?days=${DAYS}`);
   if (token !== loadToken) return;
   if (res.status === 401) { showLogin(); return; }
-  if (!res.ok) { $("#out").innerHTML = `<div class="empty">${t("error.calendar")}</div>`; return; }
+  if (!res.ok) { if (state.view === "calendar") $("#out").innerHTML = `<div class="empty">${t("error.calendar")}</div>`; return; }
   const { days } = await res.json();
   for (const d of (days || [])) all.push(...(d.classes || []));
   if (state.date && !all.some(c => c.date === state.date)) state.date = ""; // that day is gone (midnight)
@@ -968,6 +986,7 @@ async function loadBookings(attempt = 0) {
     return;
   }
   renderClasses(bookings, true);
+  if (pendingCancel) { openCancelFor(pendingCancel); pendingCancel = null; }
 }
 
 // ---- shared bookings (who's going) ----
@@ -1375,6 +1394,31 @@ async function setAutoEnabled(id, enabled) {
   } catch (e) { toast(t("toast.error") + ": " + e, true); }
 }
 
+// ---- cancel from the reminder notification (/?cancel=date|start|club|name) ----
+let pendingCancel = null, cancelTarget = null;
+
+// openCancelFor opens the confirmation for the booking the notification is about.
+function openCancelFor(key) {
+  const c = bookings.find(b => b.date === key.date && b.start === key.start && b.club === key.club && b.name === key.name);
+  if (!c) return toast(t("cancel.gone"), true);
+  cancelTarget = c;
+  const cs = catStyle(c.name);
+  const late = !canCancel(c);
+  $("#cancelBody").innerHTML = `<div class="ccard" style="--c:${cs.color}"><div class="ctile">${icon(cs.icon)}</div>
+      <div style="min-width:0"><div class="t1">${esc(c.name)}</div>
+      <div class="t2">${esc(shortClub(c.club))} · ${fmtDayTitle(c.date)} · ${c.start}${c.instructor ? " · " + esc(c.instructor) : ""}</div></div></div>
+    <p class="cnote${late ? " late" : ""}">${t(late ? "cancel.late" : "cancel.text", hm(cancelDeadline(c)))}</p>
+    <div class="cbtns"><button class="btn btn-primary btn-block" onclick="confirmCancel()">${t("cancel.yes")}</button>
+      <button class="btn btn-block" onclick="closeSheet('cancelSheet')">${t("cancel.no")}</button></div>`;
+  openSheet("cancelSheet");
+}
+
+function confirmCancel() {
+  closeSheet("cancelSheet");
+  if (cancelTarget) act("unbook", cancelTarget);
+  cancelTarget = null;
+}
+
 // ---- actions ----
 // refreshAfterAction reloads what a booking changes in the current view.
 async function refreshAfterAction() {
@@ -1544,8 +1588,15 @@ async function init() {
       $("#avatar").textContent = $("#avatarLg").textContent = (myEmail[0] || "?").toUpperCase();
       if (me.isAdmin) $("#adminTab").style.display = "";
       showApp(); load();
-      // Deep link from a notification (?view=bookings): open that tab, then clean the URL.
-      const view = new URLSearchParams(location.search).get("view");
+      // Deep link from a notification (?view=bookings, or ?cancel=… from a class
+      // reminder: Bookings with the cancel confirmation open), then clean the URL.
+      const params = new URLSearchParams(location.search);
+      const cancel = params.get("cancel");
+      if (cancel) {
+        const [date, start, club, ...name] = cancel.split("|");
+        pendingCancel = { date, start, club, name: name.join("|") };
+      }
+      const view = cancel ? "bookings" : params.get("view");
       if (view) {
         document.querySelector(`.nav button[data-view="${CSS.escape(view)}"]`)?.click();
         history.replaceState(null, "", "/");

@@ -6,6 +6,7 @@ import (
 
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/calendar"
+	"github.com/MarioPaez/VirginBot/i18n"
 )
 
 func TestDueReminders(t *testing.T) {
@@ -33,5 +34,19 @@ func TestDueReminders(t *testing.T) {
 	s.reminderCycle(now.Add(time.Minute))
 	if due := s.dueReminders(now.Add(2 * time.Minute)); len(due) != 0 {
 		t.Fatalf("sent once only: %+v", due)
+	}
+}
+
+func TestDayWord(t *testing.T) {
+	loc, _ := time.LoadLocation("Europe/Rome")
+	now := time.Date(2026, 10, 21, 22, 0, 0, 0, loc) // Wednesday night
+	for at, want := range map[time.Time]string{
+		time.Date(2026, 10, 21, 23, 0, 0, 0, loc): "hoy",
+		time.Date(2026, 10, 22, 7, 0, 0, 0, loc):  "mañana",
+		time.Date(2026, 10, 23, 7, 0, 0, 0, loc):  "viernes",
+	} {
+		if got := i18n.DayWord(i18n.ES, at, now); got != want {
+			t.Errorf("DayWord(%v) = %q, want %q", at, got, want)
+		}
 	}
 }

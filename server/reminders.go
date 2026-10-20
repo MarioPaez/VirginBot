@@ -2,9 +2,13 @@ package server
 
 import (
 	"log"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/MarioPaez/VirginBot/account"
+	"github.com/MarioPaez/VirginBot/i18n"
+	"github.com/MarioPaez/VirginBot/push"
 )
 
 // reminderGrace: a reminder is only sent close to its due time. A class booked
@@ -60,6 +64,26 @@ func (s *Server) dueReminders(now time.Time) []reminder {
 	return due
 }
 
+// sendReminder pushes "Calisthenics · today 18:15 — can't make it? Tap to
+// cancel": worded so that only someone who wants to cancel taps it, and the tap
+// opens a confirmation for that very booking (/?cancel=…).
+func (s *Server) sendReminder(r reminder, now time.Time) {
+	if s.push == nil {
+		return
+	}
+	at, ok := s.startOf(r.date, r.start)
+	if !ok {
+		return
+	}
+	lang := s.langOf(r.userID)
+	key := url.Values{"cancel": {strings.Join([]string{r.date, r.start, r.club, r.name}, "|")}}
+	s.push.Notify(r.userID, push.Message{
+		Title: i18n.T(lang, "push.reminder.title", r.name, i18n.DayWord(lang, at, now), r.start),
+		Body:  i18n.T(lang, "push.reminder.body", cancelDeadline(at).Format("15:04")),
+		URL:   "/?" + key.Encode(),
+	})
+}
+
 func (s *Server) reminderCycle(now time.Time) {
 	for _, r := range s.dueReminders(now) {
 		if _, err := s.db.Exec(`INSERT OR IGNORE INTO reminders_sent (user_id, name, club, date, start) VALUES (?, ?, ?, ?, ?)`,
@@ -67,8 +91,6 @@ func (s *Server) reminderCycle(now time.Time) {
 			log.Printf("reminders u%d: %v", r.userID, err)
 			continue
 		}
-		at, _ := s.startOf(r.date, r.start)
-		s.notifyClass(r.userID, r.name, r.club, r.date, r.start, "/?view=bookings", "push.reminder.title",
-			cancelDeadline(at).Format("15:04"))
+		s.sendReminder(r, now)
 	}
 }

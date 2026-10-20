@@ -51,7 +51,7 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 - Suggestions to automate the weekly classes you keep going to.
 
 **Everything else**
-- **Push notifications:** booked, couldn't book, a spot freed up, you're in from the waitlist, a reminder before each class (4 h by default) with the time you can cancel until, a friend booking one of your usual classes, and your Virgin password stopping working. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
+- **Push notifications:** booked, couldn't book, a spot freed up, you're in from the waitlist, a reminder before each class (4 h by default) that opens a one-tap cancel confirmation for that booking, a friend booking one of your usual classes, and your Virgin password stopping working. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
 - **Who's going:** see who else booked a class, and book, automate or watch it from there.
 - **Phone calendar:** a private `.ics` subscription link with your bookings.
 - **Installable app:** add it to the home screen for a full-screen app with its own icon. You stay signed in, and the browser offers to save your password.

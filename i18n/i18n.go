@@ -70,6 +70,23 @@ func FormatDateTime(lang Lang, t time.Time) string {
 		weekdays[l][int(t.Weekday())], t.Day(), months[l][int(t.Month())], t.Year(), t.Hour(), t.Minute())
 }
 
+// DayWord names t's day relative to now: "today", "tomorrow" or the weekday
+// (lowercase, to go mid-sentence).
+func DayWord(lang Lang, t, now time.Time) string {
+	l := Coerce(string(lang))
+	day := func(x time.Time) time.Time { return time.Date(x.Year(), x.Month(), x.Day(), 0, 0, 0, 0, x.Location()) }
+	switch int(day(t).Sub(day(now)).Hours() / 24) {
+	case 0:
+		return T(l, "day.today")
+	case 1:
+		return T(l, "day.tomorrow")
+	}
+	if l == EN {
+		return weekdays[l][int(t.Weekday())]
+	}
+	return strings.ToLower(weekdays[l][int(t.Weekday())])
+}
+
 // messages: catalog of strings with fmt-style placeholders. The keys are
 // stable; the fallback is Default when a translation is missing.
 var messages = map[Lang]map[string]string{
@@ -85,7 +102,10 @@ var messages = map[Lang]map[string]string{
 		"push.watch.missed.title":  "No se liberó ninguna plaza",
 		"push.watch.failed.title":  "Virgin rechaza la reserva: dejo de vigilarla",
 		"push.watch.started.title": "Sigue llena: la vigilo por si se libera una plaza",
-		"push.reminder.title":      "¿Sigues yendo? Si no, cancélala antes de las %s",
+		"push.reminder.title":      "%s · %s %s",
+		"push.reminder.body":       "¿No puedes ir? Toca para cancelarla antes de las %s y que no cuente como falta.",
+		"day.today":                "hoy",
+		"day.tomorrow":             "mañana",
 		"push.friend.title":        "%s también va a tu clase",
 		"push.creds.title":         "Virgin ha rechazado tu contraseña",
 		"push.creds.body":          "Tus automatizaciones están paradas. Entra en VirginBot con tu contraseña actual de Virgin Active.",
@@ -102,7 +122,10 @@ var messages = map[Lang]map[string]string{
 		"push.watch.missed.title":  "No spot freed up",
 		"push.watch.failed.title":  "Virgin keeps refusing the booking: stopped watching",
 		"push.watch.started.title": "Still full: I'm watching it for a freed spot",
-		"push.reminder.title":      "Still going? If not, cancel before %s",
+		"push.reminder.title":      "%s · %s %s",
+		"push.reminder.body":       "Can't make it? Tap to cancel before %s so it doesn't count as a no-show.",
+		"day.today":                "today",
+		"day.tomorrow":             "tomorrow",
 		"push.friend.title":        "%s is going to your class too",
 		"push.creds.title":         "Virgin rejected your password",
 		"push.creds.body":          "Your automations are stopped. Sign in to VirginBot with your current Virgin Active password.",
@@ -119,7 +142,10 @@ var messages = map[Lang]map[string]string{
 		"push.watch.missed.title":  "Non si è liberato nessun posto",
 		"push.watch.failed.title":  "Virgin rifiuta la prenotazione: smetto di osservarla",
 		"push.watch.started.title": "Ancora piena: la tengo d'occhio se si libera un posto",
-		"push.reminder.title":      "Ci vai ancora? Se no, annulla entro le %s",
+		"push.reminder.title":      "%s · %s %s",
+		"push.reminder.body":       "Non puoi venire? Tocca per annullarla entro le %s e non conterà come assenza.",
+		"day.today":                "oggi",
+		"day.tomorrow":             "domani",
 		"push.friend.title":        "Anche %s viene alla tua lezione",
 		"push.creds.title":         "Virgin ha rifiutato la tua password",
 		"push.creds.body":          "Le tue automazioni sono ferme. Accedi a VirginBot con la password attuale di Virgin Active.",
