@@ -22,7 +22,7 @@ func testServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Server{db: dbh, loc: loc, accounts: acc}
+	return &Server{db: dbh, loc: loc, accounts: acc, fetchIn: map[string]bool{}, synced: map[int64]bool{}}
 }
 
 // Waitlist places are stored apart from bookings: they don't count as booked,

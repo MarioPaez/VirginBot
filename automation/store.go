@@ -187,6 +187,13 @@ func (s *Store) Find(userID int64, name, club string, weekday int, start string)
 	return s.Get(userID, ruleKey(name, club, weekday, start))
 }
 
+// SetEnd fills in a rule's class end time (rules created before it was stored).
+func (s *Store) SetEnd(userID int64, id, end string) {
+	if _, err := s.db.Exec(`UPDATE automations SET end_time = ? WHERE user_id = ? AND id = ? AND end_time = ''`, end, userID, id); err != nil {
+		log.Printf("set rule end u%d %s: %v", userID, id, err)
+	}
+}
+
 // PurgeOnce deletes the one-off rules whose date is before `before` (YYYY-MM-DD):
 // their only occurrence is over.
 func (s *Store) PurgeOnce(before string) error {

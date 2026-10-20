@@ -14,7 +14,7 @@ var reminderChoices = []int{0, 4, 6, 12, 24}
 type settings struct {
 	ReminderHours int    `json:"reminderHours"`
 	FullAction    string `json:"fullAction"`
-	FriendNotify  bool   `json:"friendNotify"`
+	FriendNotify  *bool  `json:"friendNotify"` // nil (an older app) keeps the stored choice
 }
 
 // handleSettings: GET / PUT the user's notification preferences.
@@ -36,7 +36,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid settings", http.StatusBadRequest)
 			return
 		}
-		if err := s.accounts.SetPrefs(userID, req.ReminderHours, req.FullAction, req.FriendNotify); err != nil {
+		friends := s.accounts.FriendNotify(userID)
+		if req.FriendNotify != nil {
+			friends = *req.FriendNotify
+		}
+		req.FriendNotify = &friends
+		if err := s.accounts.SetPrefs(userID, req.ReminderHours, req.FullAction, friends); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

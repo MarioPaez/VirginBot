@@ -240,3 +240,26 @@ func TestBusySkipsBooking(t *testing.T) {
 		t.Fatalf("must not book over another booking; books=%d", books)
 	}
 }
+
+// One user's fires run in series (the second one's overlap check must see the
+// first one's booking); only different users run in parallel.
+func TestSameUserFiresInSeries(t *testing.T) {
+	loc := mustLoc(t)
+	var inFlight, peak atomic.Int32
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
+		n := inFlight.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		time.Sleep(30 * time.Millisecond)
+		inFlight.Add(-1)
+		return fullClass("bookable")(0, "", "")
+	}
+	e := NewEngine(nil, fetch, func(int64, int, int, int, string) error { return nil }, nil)
+	e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
+	a, b := sampleOcc(loc), sampleOcc(loc)
+	b.rule.ID = "y"
+	e.fireDue([]occ{a, b}, time.Date(2026, 6, 23, 18, 15, 1, 0, loc))
+	if peak.Load() != 1 {
+		t.Fatalf("one user's fires must not overlap, peak=%d", peak.Load())
+	}
+}

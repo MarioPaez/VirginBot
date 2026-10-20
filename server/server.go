@@ -54,6 +54,7 @@ type Server struct {
 
 	mu      sync.Mutex
 	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
+	synced  map[int64]bool  // users whose bookings were reconciled since start (later new bookings are news)
 }
 
 func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func(calendar.Class) bool, store *automation.Store) *Server {
@@ -65,6 +66,7 @@ func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func
 		db: db, auth: auth, accounts: accounts, clubs: clubs, keep: keep, store: store, loc: loc,
 		sess:    newSessions(db),
 		fetchIn: map[string]bool{},
+		synced:  map[int64]bool{},
 	}
 	go func() {
 		s.warm()
@@ -259,6 +261,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 	classes = s.futureOnly(classes)
 	s.markOpening(userID, classes, now)
+	s.backfillRuleEnds(userID, classes)
 	s.markWatched(userID, classes)
 	byDay := map[string][]calendar.Class{}
 	for _, c := range classes {
@@ -371,6 +374,7 @@ func (s *Server) overlayBooked(userID int64, classes []calendar.Class) []calenda
 			c.Waitlisted = b.Status == "waitlisted"
 			c.WaitlistPos = b.WaitlistPos
 			c.ClubID, c.ClassID, c.SessionID, c.BookingID = b.ClubID, b.ClassID, b.SessionID, b.BookingID
+			c.CancelBy = s.cancelBy(*c)
 		}
 	}
 	return classes
@@ -486,10 +490,15 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 		}
 		rows.Close()
 	}
-	// A user's first sync (nothing stored yet) isn't news for their friends.
+	// What's new is only news if we knew the user's bookings before: something
+	// stored, or an earlier sync since start (a first sync isn't news).
 	var known int
 	tx.QueryRow(`SELECT (SELECT COUNT(*) FROM bookings WHERE user_id = ?) + (SELECT COUNT(*) FROM history WHERE user_id = ?)`,
 		userID, userID).Scan(&known)
+	s.mu.Lock()
+	known += boolInt(s.synced[userID])
+	s.synced[userID] = true
+	s.mu.Unlock()
 	var fresh []calendar.Class
 	// Classes that already started go to the history before the rows are
 	// replaced: Virgin may stop reporting them.
@@ -617,6 +626,7 @@ func (s *Server) listBookings(userID int64) []calendar.Class {
 		}
 		c.Booked = c.Status == "booked"
 		c.Waitlisted = c.Status == "waitlisted"
+		c.CancelBy = s.cancelBy(c)
 		out = append(out, c)
 	}
 	return s.futureOnly(out)
@@ -727,11 +737,6 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	req, ok := decodeBook(w, r)
 	if !ok {
-		return
-	}
-	if at, ok := s.startOf(req.Date, req.Start); ok && time.Now().After(cancelDeadline(at)) {
-		writeJSON(w, map[string]any{"ok": false, "error": "too late to cancel: Virgin only allows it until " +
-			cancelDeadline(at).Format("15:04"), "tooLate": true})
 		return
 	}
 	err := s.auth.Do(userID, func(client *vapi.Client) error {

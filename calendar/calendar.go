@@ -53,6 +53,9 @@ type Class struct {
 	// OpensAt (RFC 3339) is when the booking window opens, set only on
 	// "unavailable" classes whose window is still in the future.
 	OpensAt string `json:"opensAt,omitempty"`
+	// CancelBy (RFC 3339) is the last moment a booking or waitlist place can be
+	// cancelled, set on the user's own ones.
+	CancelBy string `json:"cancelBy,omitempty"`
 
 	Watched bool `json:"watched"` // I'm watching it: VirginBot books it if a spot frees up
 

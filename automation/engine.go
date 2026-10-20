@@ -71,13 +71,14 @@ type Engine struct {
 }
 
 type occState struct {
-	booked       bool
-	waitlisted   bool // the spot went at the last second and Virgin waitlisted us instead: stop, they'll promote us
-	attempts     int
-	lastError    string
-	missNotified bool
-	lastFired    time.Time // last fire already executed (avoids repeating it)
-	lastStatus   string    // class status seen in the last round (not persisted)
+	booked         bool
+	waitlisted     bool // the spot went at the last second and Virgin waitlisted us instead: stop, they'll promote us
+	attempts       int
+	lastError      string
+	missNotified   bool
+	lastFired      time.Time // last fire already executed (avoids repeating it)
+	lastStatus     string    // class status seen in the last round (not persisted)
+	checkedOverlap bool      // the current fire already ran the overlap check (not persisted)
 }
 
 // ErrWaitlisted is what the book function returns when Virgin put the member on
@@ -260,18 +261,30 @@ func (e *Engine) occurrences(now time.Time) []occ {
 	return out
 }
 
-// fireDue runs maybeFire for every occurrence, the due ones concurrently (at
-// most maxParallelFires at a time), and waits for all of them.
+// fireDue runs maybeFire for every occurrence and waits for all of them:
+// different users concurrently (at most maxParallelFires at a time), one user's
+// occurrences in series, so the overlap check of one sees the booking the other
+// just made (the book function reconciles the user's bookings).
 func (e *Engine) fireDue(occs []occ, now time.Time) {
+	byUser := map[int64][]occ{}
+	var users []int64
+	for _, o := range occs {
+		if byUser[o.rule.UserID] == nil {
+			users = append(users, o.rule.UserID)
+		}
+		byUser[o.rule.UserID] = append(byUser[o.rule.UserID], o)
+	}
 	sem := make(chan struct{}, maxParallelFires)
 	var wg sync.WaitGroup
-	for _, o := range occs {
+	for _, uid := range users {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			e.maybeFire(o, now)
+			for _, o := range byUser[uid] {
+				e.maybeFire(o, now)
+			}
 		}()
 	}
 	wg.Wait()
@@ -365,14 +378,7 @@ func (e *Engine) record(o occ, outcome, detail string) {
 // bookable right as the window opens.
 func (e *Engine) attempt(o occ, st *occState) {
 	tag := fmt.Sprintf("u%d %s %s @ %s", o.rule.UserID, o.rule.Name, o.date, o.rule.Start)
-	if e.busy != nil {
-		if other, clash := e.busy(o.rule.UserID, o.rule, o.date); clash {
-			st.lastError = "overlaps " + other
-			log.Printf("automation: %s — not booking: it overlaps %s", tag, other)
-			e.record(o, OutcomeOverlap, other)
-			return
-		}
-	}
+	st.checkedOverlap = false
 	if e.lead > 0 {
 		log.Printf("automation: %s — waiting %s after the hour (the window sometimes opens a few seconds late)", tag, e.lead)
 		time.Sleep(e.lead)
@@ -404,6 +410,8 @@ func (e *Engine) attempt(o occ, st *occState) {
 				} else {
 					log.Printf("automation: %s — already booked, nothing to do", tag)
 				}
+				return
+			case e.clashes(o, st, matches[0].End, tag):
 				return
 			default:
 				// The Solarium exposes several bookable "beds" at the same time. We try
@@ -475,6 +483,33 @@ func (e *Engine) attempt(o occ, st *occState) {
 		}
 		e.record(o, outcome, st.lastError)
 	}
+}
+
+// clashes runs the overlap check once per fire, right before booking, with the
+// class's real end time (rules created before it was stored don't know it: it's
+// backfilled here).
+func (e *Engine) clashes(o occ, st *occState, end, tag string) bool {
+	if st.checkedOverlap {
+		return false
+	}
+	st.checkedOverlap = true
+	if o.rule.End == "" && end != "" && e.store != nil {
+		e.store.SetEnd(o.rule.UserID, o.rule.ID, end)
+	}
+	r := o.rule
+	if end != "" {
+		r.End = end
+	}
+	if e.busy == nil {
+		return false
+	}
+	other, clash := e.busy(o.rule.UserID, r, o.date)
+	if clash {
+		st.lastError = "overlaps " + other
+		log.Printf("automation: %s — not booking: it overlaps %s", tag, other)
+		e.record(o, OutcomeOverlap, other)
+	}
+	return clash
 }
 
 // bestStatus is the most bookable status among a class's instances (beds).
