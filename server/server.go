@@ -20,7 +20,6 @@ import (
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/i18n"
-	"github.com/MarioPaez/VirginBot/notification"
 	"github.com/MarioPaez/VirginBot/push"
 	"github.com/MarioPaez/VirginBot/vapi"
 )
@@ -47,25 +46,20 @@ type Server struct {
 	store    *automation.Store
 	loc      *time.Location
 	sess     *sessions
-	sender   notification.Sender
 	push     *push.Notifier // nil = Web Push disabled
 
 	mu      sync.Mutex
 	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
 }
 
-func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func(calendar.Class) bool, store *automation.Store, sender notification.Sender) *Server {
+func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func(calendar.Class) bool, store *automation.Store) *Server {
 	loc, err := time.LoadLocation("Europe/Rome")
 	if err != nil {
 		loc = time.UTC
 	}
-	if sender == nil {
-		sender = notification.NoOp{}
-	}
 	s := &Server{
 		db: db, auth: auth, accounts: accounts, clubs: clubs, keep: keep, store: store, loc: loc,
 		sess:    newSessions(db),
-		sender:  sender,
 		fetchIn: map[string]bool{},
 	}
 	go func() {
@@ -568,20 +562,8 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.unskip(userID, req) // automating this occurrence again overrides a past cancellation
-		booked := s.tryBookNow(userID, req)
-		lang := s.langOf(userID)
-		if booked {
-			when, _ := time.ParseInLocation("2006-01-02 15:04", req.Date+" "+req.Start, s.loc)
-			block := i18n.T(lang, "block.class", req.Name, req.Club, i18n.FormatDateTime(lang, when))
-			s.emailUser(userID,
-				i18n.T(lang, "email.booked.subject", rule.Name),
-				i18n.T(lang, "email.bookednow.body", block))
-		} else {
-			s.emailUser(userID,
-				i18n.T(lang, "email.added.subject", rule.Name),
-				i18n.T(lang, "email.added.body", rule.Summary(lang, s.loc)))
-		}
+		s.unskip(userID, req)               // automating this occurrence again overrides a past cancellation
+		booked := s.tryBookNow(userID, req) // the FE shows the outcome right away
 		writeJSON(w, map[string]any{"rule": rule, "booked": booked})
 	case http.MethodPatch:
 		id := r.URL.Query().Get("id")
@@ -597,16 +579,9 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": true})
 	case http.MethodDelete:
 		id := r.URL.Query().Get("id")
-		rule, found := s.store.Get(userID, id)
 		if err := s.store.Remove(userID, id); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-		if found {
-			lang := s.langOf(userID)
-			s.emailUser(userID,
-				i18n.T(lang, "email.removed.subject", rule.Name),
-				i18n.T(lang, "email.removed.body", rule.Summary(lang, s.loc)))
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	default:
@@ -671,15 +646,6 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 // langOf returns the user's language (it/es/en), with fallback to Default.
 func (s *Server) langOf(userID int64) i18n.Lang {
 	return i18n.Coerce(s.accounts.Lang(userID))
-}
-
-func (s *Server) emailUser(userID int64, subject, body string) {
-	to := s.auth.Email(userID)
-	go func() {
-		if err := s.sender.Send(to, subject, body); err != nil {
-			log.Printf("email notification failed (u%d): %v", userID, err)
-		}
-	}()
 }
 
 func (s *Server) curate(classes []calendar.Class) []calendar.Class {

@@ -484,12 +484,12 @@ function applyI18n() {
     `<button type="button" class="${l === lang ? "active" : ""}" onclick="setLang('${l}')">${l.toUpperCase()}</button>`).join(""));
 }
 
-// setLang changes the language: persists (local + server for the emails) and repaints.
+// setLang changes the language: persists (local + server for the notifications) and repaints.
 async function setLang(v) {
   if (!LANGS.includes(v)) return;
   lang = v;
   localStorage.setItem("lang", v);
-  fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for emails)
+  fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for the notifications)
   applyI18n();
   if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
   if ($("#acctSheet").classList.contains("open")) renderPush();
@@ -1035,7 +1035,7 @@ async function init() {
     const me = await (await fetch("/api/me")).json();
     if (me.loggedIn) {
       // The server wins: if it has a saved language we use it (consistent with the
-      // emails); otherwise we persist the one detected in the browser.
+      // notifications); otherwise we persist the one detected in the browser.
       if (LANGS.includes(me.lang)) { lang = me.lang; localStorage.setItem("lang", lang); }
       else fetch(`/api/lang?lang=${lang}`, { method: "PATCH" }).catch(() => {});
       applyI18n();

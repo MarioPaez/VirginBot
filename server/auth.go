@@ -15,7 +15,7 @@ import (
 const authTTL = 100 * time.Minute
 
 // clientAlertEvery throttles the "app credentials rejected" alert: the engine hits
-// it every round for every user, one email per window is enough.
+// it every round for every user, one notification per window is enough.
 const clientAlertEvery = 6 * time.Hour
 
 var errNoCreds = errors.New("no credentials: please sign in")
@@ -57,7 +57,11 @@ func NewAuth(store *account.Store, apiKey string) *Auth {
 
 // OnClientRejected sets who gets told when Virgin rejects the app credentials
 // (x-api-key / app version): nothing works for anyone until they're updated.
-func (a *Auth) OnClientRejected(fn func(subject, body string)) {
+// The fix: capture the official app's traffic (Proxyman with SSL Proxying) and
+// compare x-api-key, x-app-id, x-app-version and the host; a new key goes to
+// VA_API_KEY (.env and `fly secrets set`), the rest to the constants in
+// vapi/vapi.go, then deploy.
+func (a *Auth) OnClientRejected(fn func(title, body string)) {
 	a.alertMu.Lock()
 	a.alert = fn
 	a.alertMu.Unlock()
@@ -77,15 +81,9 @@ func (a *Auth) observe(err error) error {
 	}
 	a.lastAlert = time.Now()
 	alert := a.alert
-	go alert("VirginBot: Virgin Active rechaza la app (x-api-key / versión)",
-		"Virgin Active ha rechazado las credenciales de la app que usa VirginBot. "+
-			"Mientras no se actualicen, NO funciona el login, el calendario ni las reservas automáticas de ningún usuario.\n\n"+
-			"Error: "+err.Error()+"\n\n"+
-			"Qué hacer:\n"+
-			"1. Captura el tráfico de la app oficial (Proxyman con SSL Proxying) y mira x-api-key, x-app-id, x-app-version y el host.\n"+
-			"2. Si cambió la key: actualiza VA_API_KEY en .env y en Fly (fly secrets set VA_API_KEY=...).\n"+
-			"3. Si cambió la versión, el app id o el host: actualiza las constantes de vapi/vapi.go y despliega.\n\n"+
-			"No se volverá a avisar en las próximas 6 horas.")
+	go alert("Virgin rechaza la app",
+		"Login, calendario y reservas automáticas caídos para todos. "+
+			"Actualiza VA_API_KEY o la versión de la app (ver logs). No vuelvo a avisar en 6 h.")
 	return err
 }
 

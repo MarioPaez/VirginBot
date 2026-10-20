@@ -4,7 +4,7 @@
 
 # VirginBot
 
-**Books your Virgin Active Italia classes the instant the booking window opens, and emails you the result.**
+**Books your Virgin Active Italia classes the instant the booking window opens, and tells you the result on your phone.**
 
 Pure Go · single static binary · no CGO · embedded mobile-first web app · Italian, Spanish and English
 
@@ -16,7 +16,7 @@ Pure Go · single static binary · no CGO · embedded mobile-first web app · It
 
 The popular classes at my gym (Calisthenics, Reformer Pilates, Solarium) fill up within seconds of their booking window opening, eight days in advance and at the exact class time, which is usually when I'm working or asleep.
 
-VirginBot fixes that. You mark the weekly classes you care about, the bot wakes up at exactly the right moment, grabs the spot and emails you the outcome. It's a small self-hosted web app; each person logs in with their own Virgin Active account.
+VirginBot fixes that. You mark the weekly classes you care about, the bot wakes up at exactly the right moment, grabs the spot and sends the outcome straight to your phone. It's a small self-hosted web app; each person logs in with their own Virgin Active account.
 
 > It started out scraping the Virgin Active website and ended up speaking the same private JSON API as the official mobile app.
 > **[Read the reverse-engineering story →](docs/reverse-engineering.md)**
@@ -44,11 +44,10 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 **Everything else**
 - **Who's going:** see which other users have booked the same class, so you can go together.
 - **Push notifications:** install the app on your phone's home screen, turn notifications on in the account sheet, and you get an instant "Booked ✓" or "Couldn't book" on the lock screen. Tapping it opens the right tab. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
-- **Email notifications:** automation added or removed, class booked, booking failed after the last attempt.
 - **Installable app:** add it to the home screen for a full-screen app with its own icon that opens instantly.
 - **Multi-user:** an email allowlist, Virgin passwords encrypted at rest, and per-user sessions.
 - **Admin view:** see, pause and remove every user's automations, and see everyone's upcoming bookings.
-- **Three languages:** the web app and emails are in Italian, Spanish and English, detected from the browser and changeable at any time.
+- **Three languages:** the web app and notifications are in Italian, Spanish and English, detected from the browser and changeable at any time.
 - **Mobile first:** bottom navigation, bottom sheets, large touch targets and safe-area aware layouts; on desktop it becomes a centred layout with a floating nav bar.
 
 ## How the engine works
@@ -63,7 +62,7 @@ class on Mon 18:15, window opens 8 days before
 ```
 
 - At each trigger it fetches **only that class's club**, finds the session and books it. For the Solarium it tries every bed until one accepts.
-- If the booking API errors but the booking actually went through, a final check confirms it before reporting a failure, so you never get a false failure email or a double booking.
+- If the booking API errors but the booking actually went through, a final check confirms it before reporting a failure, so you never get a false failure notice or a double booking.
 - After a success it stops for that week; the rule stays active for the next one.
 
 More detail in [docs/reverse-engineering.md](docs/reverse-engineering.md#architecture).
@@ -91,8 +90,8 @@ Requires **Go 1.26+**.
 
 3. Open <http://localhost:8080> and sign in with your Virgin Active account.
 
-> **Working on the UI against real accounts?** Start it with `VIRGINBOT_NO_ENGINE=1 SMTP_HOST= go run .`
-> The engine and emails are off, so your local copy doesn't book or send mail alongside production. Book, Cancel and Auto in the UI still act on your real account.
+> **Working on the UI against real accounts?** Start it with `VIRGINBOT_NO_ENGINE=1 go run .`
+> The engine is off, so your local copy doesn't book alongside production. Book, Cancel and Auto in the UI still act on your real account.
 
 Run the tests with `go test ./...`.
 
@@ -105,10 +104,8 @@ All settings come from environment variables. The `.env` file is loaded at start
 | `APP_SECRET` | yes | Key used to encrypt stored Virgin passwords (AES-256-GCM). |
 | `VA_API_KEY` | yes | The official app's static `x-api-key`. |
 | `VA_ALLOWED_EMAILS` | | Comma-separated allowlist. Empty means open registration. |
-| `VA_ADMIN_EMAIL` | | Admin user: Admin tab, plus an email if Virgin rejects the app credentials. |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | | Email notifications. Disabled if host, user or password is missing. |
-| `SMTP_TO` | | Send every notification to this address instead of each user's (for testing). |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | | Web Push key pair. Generate it once with `go run . vapid`. Push is disabled without it. |
+| `VA_ADMIN_EMAIL` | | Admin user: Admin tab, plus a push notification if Virgin rejects the app credentials. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | | Web Push key pair. Generate it once with `go run . vapid`. Without it there are no notifications at all. |
 | `VAPID_SUBJECT` | | Contact for push services (`mailto:` or `https:`). Default: `mailto:` + `VA_ADMIN_EMAIL`. |
 | `VA_EMAIL`, `VA_PASS` | | Seed the first user when the database is empty. |
 | `ADDR` | | Listen address. Default `:8080`. |
@@ -124,7 +121,7 @@ The repo includes a multi-stage `Dockerfile` (distroless image, static binary wi
 ```bash
 fly apps create <name>
 fly volumes create virginbot_data --region fra --size 1 -a <name>
-fly secrets set -a <name> APP_SECRET=... VA_API_KEY=... VA_ALLOWED_EMAILS=... VA_ADMIN_EMAIL=... SMTP_HOST=...
+fly secrets set -a <name> APP_SECRET=... VA_API_KEY=... VA_ALLOWED_EMAILS=... VA_ADMIN_EMAIL=...
 fly secrets set -a <name> $(go run . vapid | tr '\n' ' ')   # push keys, never printed
 fly deploy -a <name>
 ```
@@ -144,7 +141,7 @@ Clubs are identified by vapi's numeric `clubId`. `GET /clubs`, with a signed-in 
 - Virgin passwords are encrypted at rest with AES-256-GCM. `APP_SECRET` is mandatory; there is no insecure default.
 - Sign-in is rate-limited per IP and can be restricted with an email allowlist.
 - Session cookies are `HttpOnly`, `Secure` over HTTPS and `SameSite=Lax`, with a 30-day lifetime.
-- `VA_API_KEY` is the app's public static key, but it still lives in secrets, not in the repo. If Virgin rotates it, the admin gets an email.
+- `VA_API_KEY` is the app's public static key, but it still lives in secrets, not in the repo. If Virgin rotates it, the admin gets a push notification.
 - `.env`, the database and traffic captures are git-ignored. No secrets are committed.
 
 ## Architecture
@@ -159,8 +156,7 @@ Pure Go with a single dependency tree and no CGO: SQLite via `modernc.org/sqlite
 | `account/` | Users and encrypted credentials. |
 | `server/` | HTTP API, embedded web app, sessions, per-user API clients, bookings sync, admin. |
 | `db/` | SQLite schema and idempotent migrations. |
-| `i18n/` | Dates and email text in it/es/en. |
-| `notification/` | SMTP email. |
+| `i18n/` | Dates and notification text in it/es/en. |
 | `push/` | Web Push: payload encryption (RFC 8291), VAPID (RFC 8292) and per-device subscriptions. Standard library only. |
 
 ## Motivation

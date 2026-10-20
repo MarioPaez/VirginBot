@@ -241,7 +241,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetLang sets the user's preferred language (it/es/en). Used by the
-// frontend selector; affects the UI and the emails.
+// frontend selector; affects the UI and the notifications.
 func (s *Server) handleSetLang(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	lang := string(i18n.Coerce(r.URL.Query().Get("lang")))

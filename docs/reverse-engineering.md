@@ -74,12 +74,12 @@ Pure Go, single binary, SQLite for persistence (`modernc.org/sqlite`, no CGO), w
 | `calendar/` | The `Class` model + club id↔name mapping. |
 | `account/` | User store; Virgin passwords encrypted at rest (AES-256-GCM, key from `APP_SECRET`). |
 | `automation/` | Recurring rules store + the **precise-timing engine**. |
-| `i18n/` | Server-side translations (dates + email text) in it/es/en. |
-| `notification/` | Email (SMTP) notifications. |
+| `i18n/` | Server-side translations (dates + notification text) in it/es/en. |
+| `push/` | Web Push notifications (RFC 8291 encryption, VAPID), standard library only. |
 | `db/` | SQLite schema + idempotent migrations. |
 | `server/` | HTTP API, embedded web UI, sessions, per-user vapi auth, bookings reconciliation, automations. |
 
-The **automation engine** is deliberately *not* a polling loop: it sleeps until the next trigger (the class time, each day from the window opening until 24 h before) and only then touches the network — efficient and unlikely to get the IP throttled. After a successful booking it stops; the rule stays active for the following week. If the booking API errors out but the reservation actually went through, a final reconciliation step detects it and avoids a false-failure email or a double booking.
+The **automation engine** is deliberately *not* a polling loop: it sleeps until the next trigger (the class time, each day from the window opening until 24 h before) and only then touches the network — efficient and unlikely to get the IP throttled. After a successful booking it stops; the rule stays active for the following week. If the booking API errors out but the reservation actually went through, a final reconciliation step detects it and avoids a false-failure notification or a double booking.
 
 ---
 

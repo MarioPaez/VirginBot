@@ -13,7 +13,6 @@ import (
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/db"
-	"github.com/MarioPaez/VirginBot/notification"
 	"github.com/MarioPaez/VirginBot/push"
 	"github.com/MarioPaez/VirginBot/server"
 	"github.com/MarioPaez/VirginBot/vapi"
@@ -102,29 +101,27 @@ func main() {
 
 	store := automation.NewStore(database)
 
-	sender := notification.FromEnv()
-	srv := server.New(database, auth, acc, clubs, keep, store, sender)
+	srv := server.New(database, auth, acc, clubs, keep, store)
+	notifier := pushFromEnv(database) // nil = no notifications at all
+	srv.SetPush(notifier)
 
-	// Outdated x-api-key / app version breaks everyone: tell the admin.
-	if admin := strings.TrimSpace(os.Getenv("VA_ADMIN_EMAIL")); admin != "" {
-		auth.OnClientRejected(func(subject, body string) {
-			if err := sender.Send(admin, subject, body); err != nil {
-				log.Printf("admin alert email failed: %v", err)
+	// Outdated x-api-key / app version breaks everyone: push it to the admin's
+	// devices (looked up at alert time: the admin may sign in after startup).
+	if admin := strings.TrimSpace(os.Getenv("VA_ADMIN_EMAIL")); admin != "" && notifier != nil {
+		auth.OnClientRejected(func(title, body string) {
+			for _, uid := range acc.ListUserIDs() {
+				if strings.EqualFold(acc.Email(uid), admin) && notifier.Notify(uid, push.Message{Title: title, Body: body, URL: "/"}) > 0 {
+					return
+				}
 			}
+			log.Printf("admin alert not delivered: %s has no device with notifications on", admin)
 		})
 	} else {
-		log.Println("warning: VA_ADMIN_EMAIL not set: no alert if Virgin rejects the app credentials")
+		log.Println("warning: no admin alerts (needs VA_ADMIN_EMAIL and push notifications)")
 	}
 
-	// notifyUser routes each notification to the matching user's email.
-	notifyUser := func(userID int64, subject, body string) {
-		if err := sender.Send(auth.Email(userID), subject, body); err != nil {
-			log.Printf("email notification failed (u%d): %v", userID, err)
-		}
-	}
-
-	// Automation engine: polls with precise timing (fresh fetch per day and user),
-	// books with each user's authenticated client and notifies by email.
+	// Automation engine: precise fires (fresh fetch of the class's club), books
+	// with each user's authenticated client and pushes the outcome.
 	engine := automation.NewEngine(store, srv.FreshDayFor, func(userID int64, clubID, classID, sessionID int, date string) error {
 		// auth.Do re-logs in and retries if the token is expired (401).
 		bookErr := auth.Do(userID, func(client *vapi.Client) error {
@@ -134,11 +131,8 @@ func main() {
 		// booking may have gone through; the engine's next round detects it (overlay).
 		srv.InvalidateUser(userID)
 		return bookErr
-	}, notifyUser, acc.Lang)
-
-	// Web Push: the booking outcomes also reach the user's devices instantly.
-	if notifier := pushFromEnv(database); notifier != nil {
-		srv.SetPush(notifier)
+	}, acc.Lang)
+	if notifier != nil {
 		engine.SetPush(func(userID int64, title, body, url string) {
 			go notifier.Notify(userID, push.Message{Title: title, Body: body, URL: url}) // never delay the engine
 		})

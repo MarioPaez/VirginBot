@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ ! -f .env ]; then
-  echo "⚠️  Falta .env (necesita APP_SECRET, SMTP_*, VA_ALLOWED_EMAILS). Aborto."
+  echo "⚠️  Falta .env (necesita APP_SECRET y VA_API_KEY). Aborto."
   exit 1
 fi
 

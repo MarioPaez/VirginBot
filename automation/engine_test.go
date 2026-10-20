@@ -61,7 +61,7 @@ func TestFiresAtClassHourNotBefore(t *testing.T) {
 		}}, nil
 	}
 	book := func(int64, int, int, int, string) error { books++; return nil }
-	e := NewEngine(nil, fetch, book, nil, nil)
+	e := NewEngine(nil, fetch, book, nil)
 	e.loc = loc
 	e.gap = 0
 	e.gap1 = 0
@@ -98,7 +98,7 @@ func TestPushOnBooked(t *testing.T) {
 		}}, nil
 	}
 	book := func(int64, int, int, int, string) error { return nil }
-	e := NewEngine(nil, fetch, book, nil, func(int64) string { return "es" })
+	e := NewEngine(nil, fetch, book, func(int64) string { return "es" })
 	e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
 	var got []string
 	e.SetPush(func(userID int64, title, body, url string) { got = append(got, title, body, url) })
@@ -112,7 +112,7 @@ func TestPushOnBooked(t *testing.T) {
 	}
 }
 
-func TestFailureEmailAfterLastTrigger(t *testing.T) {
+func TestFailureNoticeAfterLastTrigger(t *testing.T) {
 	loc := mustLoc(t)
 	o := sampleOcc(loc)
 
@@ -124,13 +124,13 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 		}}, nil
 	}
 	book := func(int64, int, int, int, string) error { return nil }
-	var failEmails int
-	notify := func(_ int64, subject, _ string) {
-		if strings.HasPrefix(subject, "VirginBot: ✗") {
-			failEmails++
+	var failNotices int
+	e := NewEngine(nil, fetch, book, nil)
+	e.SetPush(func(_ int64, _, _, url string) {
+		if url == "/?view=automations" { // the "couldn't book" notice
+			failNotices++
 		}
-	}
-	e := NewEngine(nil, fetch, book, notify, nil)
+	})
 	e.loc = loc
 	e.gap = 0
 	e.gap1 = 0
@@ -138,13 +138,13 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 
 	// Intermediate fire (T-2d 18:15): no failure notice yet.
 	e.maybeFire(o, time.Date(2026, 6, 27, 18, 15, 1, 0, loc))
-	if failEmails != 0 {
-		t.Fatalf("must not notify failure on intermediate fires; failEmails=%d", failEmails)
+	if failNotices != 0 {
+		t.Fatalf("must not notify failure on intermediate fires; failNotices=%d", failNotices)
 	}
 	// Last fire (T-1d 18:15): notifies failure once.
 	e.maybeFire(o, time.Date(2026, 6, 28, 18, 15, 1, 0, loc))
-	if failEmails != 1 {
-		t.Fatalf("must notify failure after the last fire; failEmails=%d", failEmails)
+	if failNotices != 1 {
+		t.Fatalf("must notify failure after the last fire; failNotices=%d", failNotices)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestFallbackOnlyForNewRules(t *testing.T) {
 	}
 	book := func(int64, int, int, int, string) error { books++; return nil }
 	newEngine := func() *Engine {
-		e := NewEngine(nil, fetch, book, nil, nil)
+		e := NewEngine(nil, fetch, book, nil)
 		e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
 		return e
 	}
@@ -201,7 +201,7 @@ func TestPausedRuleNotScheduled(t *testing.T) {
 		t.Fatalf("add rule: %v", err)
 	}
 
-	e := NewEngine(store, nil, nil, nil, nil)
+	e := NewEngine(store, nil, nil, nil)
 	e.loc = loc
 
 	// The horizon (9 days) can span the same weekday twice: what matters is
@@ -245,7 +245,7 @@ func TestSkippedOccurrenceNotScheduled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add rule: %v", err)
 	}
-	e := NewEngine(store, nil, nil, nil, nil)
+	e := NewEngine(store, nil, nil, nil)
 	e.loc = loc
 
 	has := func(d string) bool {
@@ -330,26 +330,26 @@ func TestFinalReconcileConfirmsBooking(t *testing.T) {
 		return []calendar.Class{c}, nil
 	}
 	book := func(int64, int, int, int, string) error { return errors.New("HTTP 500") }
-	var okEmails, failEmails int
-	notify := func(_ int64, subject, _ string) {
-		switch {
-		case strings.HasPrefix(subject, "VirginBot: ✓"):
-			okEmails++
-		case strings.HasPrefix(subject, "VirginBot: ✗"):
-			failEmails++
+	var okNotices, failNotices int
+	e := NewEngine(nil, fetch, book, nil)
+	e.SetPush(func(_ int64, _, _, url string) {
+		switch url {
+		case "/?view=bookings":
+			okNotices++
+		case "/?view=automations":
+			failNotices++
 		}
-	}
-	e := NewEngine(nil, fetch, book, notify, nil)
+	})
 	e.loc = loc
 	e.rounds = 2
 	e.gap, e.gap1, e.lead = 0, 0, 0
 
 	// Last fire (T-1d 18:15): book always fails, but the booking went through.
 	e.maybeFire(o, time.Date(2026, 6, 28, 18, 15, 1, 0, loc))
-	if failEmails != 0 {
-		t.Fatalf("must not notify failure if the booking went through; failEmails=%d", failEmails)
+	if failNotices != 0 {
+		t.Fatalf("must not notify failure if the booking went through; failNotices=%d", failNotices)
 	}
-	if okEmails != 1 {
-		t.Fatalf("must confirm the booking in the final reconciliation; okEmails=%d", okEmails)
+	if okNotices != 1 {
+		t.Fatalf("must confirm the booking in the final reconciliation; okNotices=%d", okNotices)
 	}
 }

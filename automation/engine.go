@@ -37,9 +37,8 @@ type Engine struct {
 	store    *Store
 	fetchDay func(userID int64, club, date string) ([]calendar.Class, error) // fresh fetch of a club's day (authenticated, curated)
 	book     func(userID int64, clubID, classID, sessionID int, date string) error
-	notify   func(userID int64, subject, body string)
-	push     func(userID int64, title, body, url string) // optional (SetPush): instant notification on the user's devices
-	lang     func(userID int64) string                   // user's language for emails (it/es/en); nil = Default
+	push     func(userID int64, title, body, url string) // booking outcomes on the user's devices (SetPush); nil = silent
+	lang     func(userID int64) string                   // user's language for notifications (it/es/en); nil = Default
 	loc      *time.Location
 	rounds   int           // attempts per fire
 	lead     time.Duration // lead after the hour before the 1st attempt
@@ -63,18 +62,14 @@ func NewEngine(
 	store *Store,
 	fetchDay func(int64, string, string) ([]calendar.Class, error),
 	book func(int64, int, int, int, string) error,
-	notify func(int64, string, string),
 	lang func(int64) string,
 ) *Engine {
 	loc, err := time.LoadLocation("Europe/Rome")
 	if err != nil {
 		loc = time.UTC
 	}
-	if notify == nil {
-		notify = func(int64, string, string) {}
-	}
 	return &Engine{
-		store: store, fetchDay: fetchDay, book: book, notify: notify, lang: lang, loc: loc,
+		store: store, fetchDay: fetchDay, book: book, lang: lang, loc: loc,
 		rounds: envInt("VIRGINBOT_ATTEMPTS", defaultAttempts),
 		lead:   time.Duration(envInt("VIRGINBOT_LEAD_SEC", defaultLeadSec)) * time.Second,
 		gap1:   time.Duration(envInt("VIRGINBOT_GAP1_SEC", defaultGap1Sec)) * time.Second,
@@ -84,8 +79,8 @@ func NewEngine(
 	}
 }
 
-// SetPush adds an instant (Web Push) notification for the booking outcomes, on
-// top of the email. Not set = email only.
+// SetPush sets how the booking outcomes reach the user (Web Push to their
+// devices). Not set = no notifications.
 func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.push = fn }
 
 // pushOutcome sends the short version of a booking outcome to the user's devices.
@@ -194,7 +189,7 @@ func (e *Engine) occurrences(now time.Time) []occ {
 
 // maybeFire fires an attempt when due: there's a fire (class time) that's past
 // and not yet executed. After the last fire (24h before) without success, it
-// notifies by email.
+// notifies the user.
 func (e *Engine) maybeFire(o occ, now time.Time) {
 	st := e.ensureState(o)
 	if st.booked {
@@ -238,15 +233,6 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	last := o.start.Add(-24 * time.Hour)
 	if !st.booked && !st.missNotified && !dueT.Before(last) {
 		st.missNotified = true
-		lang := e.langOf(o.rule.UserID)
-		reason := st.lastError
-		if reason == "" {
-			reason = i18n.T(lang, "email.failed.noreason")
-		}
-		e.notify(o.rule.UserID,
-			i18n.T(lang, "email.failed.subject", o.rule.Name),
-			i18n.T(lang, "email.failed.body",
-				classLines(lang, o.rule.Name, o.rule.Club, o.start), st.attempts, reason))
 		e.pushOutcome(o, "push.failed.title", "/?view=automations")
 	}
 }
@@ -322,7 +308,7 @@ func (e *Engine) attempt(o occ, st *occState) {
 	// Final reconciliation: if on the LAST round book returned an error but the
 	// booking went through, there's no next round to detect it via overlay. We
 	// query once more to confirm before declaring the fire failed (avoids a false
-	// failure email and a retry that would double-book).
+	// failure notification and a retry that would double-book).
 	if !st.booked && st.attempts > 0 {
 		if classes, err := e.fetchDay(o.rule.UserID, o.rule.Club, o.date); err == nil {
 			if bookedMatch(findMatches(classes, o.rule, o.date)) != nil {
@@ -409,16 +395,9 @@ func (e *Engine) langOf(userID int64) i18n.Lang {
 	return i18n.Coerce(e.lang(userID))
 }
 
-// notifyBooked notifies the member of a successful booking (includes the attempt
-// count if any: direct booking, confirmation after an API error, or reconciliation).
+// notifyBooked tells the member about a successful booking (direct, confirmed
+// after an API error, or found in the final reconciliation).
 func (e *Engine) notifyBooked(o occ, st *occState) {
-	lang := e.langOf(o.rule.UserID)
-	body := i18n.T(lang, "email.booked.body", classLines(lang, o.rule.Name, o.rule.Club, o.start))
-	if st.attempts > 0 {
-		body += i18n.T(lang, "email.attempts", st.attempts)
-	}
-	body += i18n.T(lang, "email.booked.outro")
-	e.notify(o.rule.UserID, i18n.T(lang, "email.booked.subject", o.rule.Name), body)
 	e.pushOutcome(o, "push.booked.title", "/?view=bookings")
 }
 
