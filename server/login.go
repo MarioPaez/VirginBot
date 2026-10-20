@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/i18n"
 	"github.com/MarioPaez/VirginBot/vapi"
 )
@@ -139,6 +140,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.accounts.SetLang(userID, string(i18n.Normalize(r.Header.Get("Accept-Language"))))
 	}
 	s.InvalidateUser(userID) // reload the calendar with the authenticated session
+	go s.syncHomeClub(userID)
 	writeJSON(w, map[string]any{"ok": true, "email": req.Email})
 }
 
@@ -226,10 +228,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleMe reports the session status and the logged-in user's email.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.userOf(r)
-	email, lang := "", ""
+	email, lang, homeClub := "", "", ""
 	if ok {
 		email = s.auth.Email(userID)
 		lang = s.accounts.Lang(userID)
+		homeClub = calendar.ClubNames[s.accounts.HomeClub(userID)] // "" if unknown or not one we show
 	}
 	writeJSON(w, map[string]any{
 		"loggedIn":   ok,
@@ -237,6 +240,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"email":      email,
 		"lang":       lang,
 		"isAdmin":    ok && isAdmin(email),
+		"homeClub":   homeClub,
 	})
 }
 

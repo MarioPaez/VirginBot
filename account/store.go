@@ -96,6 +96,19 @@ func (s *Store) SetLang(userID int64, lang string) error {
 	return err
 }
 
+// HomeClub returns the vapi clubId of the user's home club (0 = unknown).
+func (s *Store) HomeClub(userID int64) int {
+	var id int
+	s.db.QueryRow(`SELECT home_club FROM users WHERE id = ?`, userID).Scan(&id)
+	return id
+}
+
+// SetHomeClub stores the user's home club (vapi clubId).
+func (s *Store) SetHomeClub(userID int64, clubID int) error {
+	_, err := s.db.Exec(`UPDATE users SET home_club = ? WHERE id = ?`, clubID, userID)
+	return err
+}
+
 // ListUserIDs returns the ids of all registered users.
 func (s *Store) ListUserIDs() []int64 {
 	rows, err := s.db.Query(`SELECT id FROM users ORDER BY id`)

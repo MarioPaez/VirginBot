@@ -141,13 +141,32 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 				Name: k.Name, Club: calendar.ClubNames[clubID], Studio: k.StudioName,
 				Instructor: instructorsOf(k.Instructors),
 				ClubID:     clubID, ClassID: k.ID, SessionID: k.SessionID,
-				Status:        mapStatus(k.BookableStatus),
-				Spots:         k.spots(), Capacity: k.BookingCap,
+				Status: mapStatus(k.BookableStatus),
+				Spots:  k.spots(), Capacity: k.BookingCap,
 				WaitlistCount: k.WaitlistCount, WaitlistCap: k.WaitlistCap,
 			})
 		}
 	}
 	return out, nil
+}
+
+// HomeClub returns the clubId of the member's home club (GET /member,
+// memberships[].homeClubId), or 0 if Virgin doesn't report one.
+func (c *Client) HomeClub() (int, error) {
+	var m struct {
+		Memberships []struct {
+			HomeClubID int `json:"homeClubId"`
+		} `json:"memberships"`
+	}
+	if err := c.do(http.MethodGet, "/member", nil, nil, &m); err != nil {
+		return 0, err
+	}
+	for _, ms := range m.Memberships {
+		if ms.HomeClubID != 0 {
+			return ms.HomeClubID, nil
+		}
+	}
+	return 0, nil
 }
 
 type apiBooking struct {

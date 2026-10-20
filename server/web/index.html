@@ -561,6 +561,15 @@ const minutesBetween = (a, b) => { const m = s => +s.slice(0, 2) * 60 + +s.slice
 const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const payload = c => esc(JSON.stringify(c));
 
+// Per-device preferences. Storage may be unavailable (private mode): never fatal.
+const pref = {
+  get(k) { try { return localStorage.getItem(`${k}:${myEmail}`); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(`${k}:${myEmail}`, v); } catch (e) {} },
+};
+// setClub changes the club filter and remembers it (an explicit "All" included),
+// so the home club is only the default until the user picks something else.
+function setClub(v) { state.club = v; pref.set("club", v); }
+
 let toastTimer;
 function toast(msg, isErr, ms = 3500) {
   const el = $("#toast");
@@ -672,14 +681,14 @@ function updateFilterBar() {
 }
 
 function removeFilter(kind, v) {
-  if (kind === "club") state.club = "";
+  if (kind === "club") setClub("");
   else state[kind].delete(v);
   populateFilters();
   render();
 }
 
 function clearFilters() {
-  state.cats.clear(); state.pilates.clear(); state.club = "";
+  state.cats.clear(); state.pilates.clear(); setClub("");
   populateFilters();
   render();
 }
@@ -1032,7 +1041,7 @@ $("#dayStrip").addEventListener("click", e => {
   $(sel).addEventListener("click", e => {
     const chip = e.target.closest(".chip"); if (!chip) return;
     const val = chip.dataset.val;
-    if (key === "club") state.club = val;
+    if (key === "club") setClub(val);
     else if (val === "") state[key].clear();
     else state[key].has(val) ? state[key].delete(val) : state[key].add(val);
     populateFilters(); // Pilates types depend on the class selection
@@ -1066,6 +1075,8 @@ async function init() {
       else fetch(`/api/lang?lang=${lang}`, { method: "PATCH" }).catch(() => {});
       applyI18n();
       myEmail = me.email || "";
+      const club = pref.get("club");
+      state.club = club !== null ? club : (me.homeClub || ""); // home club until the user picks another
       $("#user").textContent = myEmail;
       $("#avatar").textContent = $("#avatarLg").textContent = (myEmail[0] || "?").toUpperCase();
       if (me.isAdmin) $("#adminTab").style.display = "";

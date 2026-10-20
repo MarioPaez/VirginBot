@@ -75,6 +75,24 @@ func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func
 func (s *Server) warm() {
 	for _, uid := range s.accounts.ListUserIDs() {
 		s.fetchBookings(uid)
+		if s.accounts.HomeClub(uid) == 0 {
+			s.syncHomeClub(uid) // users who signed in before the home club was stored
+		}
+	}
+}
+
+// syncHomeClub stores the member's home club (from vapi), the calendar's default
+// club filter.
+func (s *Server) syncHomeClub(userID int64) {
+	var club int
+	if err := s.auth.Do(userID, func(c *vapi.Client) (err error) { club, err = c.HomeClub(); return err }); err != nil {
+		log.Printf("home club u%d: %v", userID, err)
+		return
+	}
+	if club != 0 {
+		if err := s.accounts.SetHomeClub(userID, club); err != nil {
+			log.Printf("home club u%d: %v", userID, err)
+		}
 	}
 }
 
