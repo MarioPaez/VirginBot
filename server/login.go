@@ -23,7 +23,8 @@ import (
 
 const (
 	sessionCookie = "va_session"
-	sessionTTL    = 30 * 24 * time.Hour // tokens expire after 30 days
+	sessionTTL    = 30 * 24 * time.Hour // tokens expire after 30 days without using the app
+	sessionRenew  = 24 * time.Hour      // a session older than this is renewed on the next visit (sliding expiry)
 
 	loginWindow      = 5 * time.Minute // login rate-limit window
 	loginMaxAttempts = 8               // attempts allowed per IP and window
@@ -96,6 +97,30 @@ func (s *sessions) valid(tok string) (int64, bool) {
 	return userID, true
 }
 
+// renew restarts the session's lifetime if it's older than sessionRenew (at
+// most one write a day per session). Reports whether it did.
+func (s *sessions) renew(tok string) bool {
+	res, err := s.db.Exec(`UPDATE sessions SET created = ? WHERE token = ? AND created < ?`,
+		time.Now().Format(time.RFC3339), tok, time.Now().Add(-sessionRenew).Format(time.RFC3339))
+	if err != nil {
+		log.Printf("renew session: %v", err)
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
+// setSessionCookie stores the session token in a PERSISTENT cookie: without an
+// expiry it's a browser-session cookie, which iOS drops whenever the installed
+// app is closed, asking for the login on every open.
+func setSessionCookie(w http.ResponseWriter, r *http.Request, tok string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r),
+		MaxAge: int(sessionTTL / time.Second),
+	})
+}
+
 func (s *sessions) destroy(tok string) {
 	s.db.Exec(`DELETE FROM sessions WHERE token = ?`, tok)
 }
@@ -131,10 +156,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok := s.sess.create(userID)
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: isHTTPS(r),
-	})
+	setSessionCookie(w, r, tok)
 	// Detect the browser language the first time (doesn't override a prior choice).
 	if s.accounts.Lang(userID) == "" {
 		s.accounts.SetLang(userID, string(i18n.Normalize(r.Header.Get("Accept-Language"))))
@@ -230,6 +252,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	userID, ok := s.userOf(r)
 	email, lang, homeClub := "", "", ""
 	if ok {
+		// Every app open calls /api/me: keep an active user signed in (sliding
+		// 30 days), re-issuing the cookie too (it also upgrades old cookies that
+		// were set without an expiry).
+		if c, err := r.Cookie(sessionCookie); err == nil {
+			s.sess.renew(c.Value)
+			setSessionCookie(w, r, c.Value)
+		}
 		email = s.auth.Email(userID)
 		lang = s.accounts.Lang(userID)
 		homeClub = calendar.ClubNames[s.accounts.HomeClub(userID)] // "" if unknown or not one we show
