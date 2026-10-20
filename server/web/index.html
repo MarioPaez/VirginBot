@@ -772,7 +772,7 @@ let userStats = null; // GET /api/stats
 async function loadBookings(attempt = 0) {
   if (attempt === 0) {
     $("#out").innerHTML = `<div class="loading">${t("loading.bookings")}</div>`;
-    fetch("/api/stats").then(r => r.json()).then(st => { userStats = st; if (state.view === "bookings") renderClasses(bookings, true); }).catch(() => {});
+    fetch("/api/stats").then(r => r.json()).then(st => { userStats = st; if (state.view === "bookings" && !$("#out .loading")) renderClasses(bookings, true); }).catch(() => {});
   }
   bookings = (await (await fetch(`/api/bookings`)).json()) || [];
   if (state.view !== "bookings") return;
