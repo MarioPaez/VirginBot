@@ -34,6 +34,7 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 - Live classes for the next 10 days across the configured clubs (Milano Corso Como, Milano Cavour, Palermo), with real availability: bookable, full or not yet open.
 - A date strip to jump to a day, plus a filter sheet: class (Calisthenics, Lift, Pilates, Solarium, Full Body, TRX, Cycle), Pilates variant (Reformer Align, Athletic, Tower…) and club.
 - Book and cancel in one tap. *My bookings* always matches the official app, because both read the same backend.
+- **Waitlists:** on a full class, join its waitlist in one tap ("Full · 3 waiting"). *My bookings* shows your position and lets you leave it, and you get a push notification the moment you're moved into the class.
 
 **Automations**
 - Tap **Auto** on a class and VirginBot books that class **every week**.
@@ -63,7 +64,7 @@ class on Mon 18:15, window opens 8 days before
 
 - At each trigger it fetches **only that class's club**, finds the session and books it. For the Solarium it tries every bed until one accepts.
 - If the booking API errors but the booking actually went through, a final check confirms it before reporting a failure, so you never get a false failure notice or a double booking.
-- After a success it stops for that week; the rule stays active for the next one.
+- After a success it stops for that week; the rule stays active for the next one. If the spot goes in the split second between checking and booking, Virgin puts you on the waitlist instead: the engine stops there and tells you your position.
 
 More detail in [docs/reverse-engineering.md](docs/reverse-engineering.md#architecture).
 

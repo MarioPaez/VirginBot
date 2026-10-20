@@ -96,11 +96,16 @@
   .crow:last-child { border-radius:0 0 15px 15px; }
   .crow:only-child { border-radius:15px; }
   .crow.booked { background:linear-gradient(90deg, var(--ok-soft), transparent 70%); }
+  .crow.waitl { background:linear-gradient(90deg, var(--warn-soft), transparent 70%); }
   .ctime { font-variant-numeric:tabular-nums; line-height:1.2; padding-top:1px; }
   .ctime .s { display:block; font-weight:700; font-size:16px; }
   .ctime .e { display:block; color:var(--dim); font-size:12px; margin-top:3px; }
   .cbk { display:inline-flex; align-items:center; gap:4px; margin-top:4px; color:#86efac; font-size:13px; font-weight:600; }
   .cbk svg.i { width:15px; height:15px; stroke-width:2.6; }
+  .cwl { display:inline-flex; align-items:center; gap:5px; margin-top:4px; color:#fcd34d; font-size:13px; font-weight:600; }
+  .cwl svg.i { width:15px; height:15px; }
+  .cinfo { margin-top:4px; color:var(--dim); font-size:12.5px; }
+  .btn-wait { background:var(--warn-soft); border-color:rgba(245,158,11,.4); color:#fcd34d; }
   .cmain { min-width:0; }
   .cname { display:flex; align-items:center; gap:7px; font-weight:600; font-size:15.5px; }
   .cname span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -327,6 +332,7 @@
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M15.5 5.2a3.5 3.5 0 0 1 0 6.6M18 14.8c1.7.8 2.9 2.5 3.5 5.2"/></symbol>
   <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 2.5l3 3-3 3"/><path d="M4 11.5v-1a5 5 0 0 1 5-5h11"/><path d="M7 21.5l-3-3 3-3"/><path d="M20 12.5v1a5 5 0 0 1-5 5H4"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.5-3.2 8.2-7.5 9.5-4.3-1.3-7.5-5-7.5-9.5V6z"/></symbol>
+  <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M7 3.5h10M7 20.5h10M8 3.5c0 4 8 5 8 8.5s-8 4.5-8 8.5M16 3.5c0 4-8 5-8 8.5s8 4.5 8 8.5"/></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5s1.2-6.1 3.5-8.5z"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
@@ -370,7 +376,7 @@ const I18N = {
     "loading.bookings": "Caricamento prenotazioni…", "error.calendar": "Impossibile caricare il calendario. Riprova.",
     "row.booked": "Prenotata", "action.cancel": "Annulla", "action.book": "Prenota", "action.auto": "Auto",
     "auto.on.title": "Prenotazione automatica attiva: tocca per disattivarla", "auto.off.title": "Prenota questa lezione ogni settimana",
-    "status.full": "Pieno", "status.unavailable": "Non disponibile",
+    "status.unavailable": "Non disponibile",
     "empty.bookings": "Non hai prenotazioni nei prossimi giorni.", "empty.calendar": "Nessuna lezione con questi filtri.",
     "empty.autos": "Non hai ancora automatizzato nessuna lezione.<br>Attiva <b>Auto</b> su una lezione del calendario e la prenoterò ogni settimana.",
     "empty.autos.filtered": "Nessuna automazione con questi filtri.",
@@ -382,6 +388,7 @@ const I18N = {
     "toast.activated": "Attivata ✓", "toast.paused": "In pausa", "toast.booked": "Prenotata ✓", "toast.cancelled": "Annullata ✓",
     "toast.cancelledskip": "Annullata ✓ L'automazione di %s resta attiva per le prossime settimane, ma non prenoterà quella di %s. Se vuoi andarci, prenotala tu.",
     "toast.error": "Errore", "toast.bookedbang": "Prenotata! ✓", "toast.autoadded": "Automazione aggiunta ✓", "toast.autoremoved": "Automazione rimossa",
+    "action.joinwait": "Lista d'attesa", "action.leave": "Esci dalla lista", "row.waitlisted": "In lista d'attesa · posizione %d", "row.waitcount": "Pieno · %d in attesa", "row.waitopen": "Pieno · lista d'attesa aperta", "status.closed": "Completo", "toast.waitlisted": "In lista d'attesa · posizione %d ✓", "toast.leftwait": "Sei uscito dalla lista d'attesa", "toast.autowaitlisted": "Automazione aggiunta · la lezione si è riempita: sei in lista d'attesa (posizione %d)",
     "menu.notifications": "Notifiche", "push.hint": "Ti avviso all'istante quando prenoto una lezione o non trovo posto.", "push.enable": "Attiva notifiche", "push.on": "Attive su questo dispositivo", "push.test": "Invia una prova", "push.disable": "Disattiva", "push.ios": "Per ricevere notifiche sull'iPhone, aggiungi VirginBot alla schermata Home e aprila da lì.", "push.denied": "Le notifiche sono bloccate per VirginBot nelle impostazioni del dispositivo.", "push.unsupported": "Questo browser non supporta le notifiche.", "toast.push.on": "Notifiche attivate ✓", "toast.push.off": "Notifiche disattivate", "toast.push.test": "Prova inviata",
     "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Entra", "login.loading": "Accesso…",
@@ -402,7 +409,7 @@ const I18N = {
     "loading.bookings": "Cargando tus reservas…", "error.calendar": "No se pudo cargar el calendario. Reintenta.",
     "row.booked": "Reservada", "action.cancel": "Cancelar", "action.book": "Reservar", "action.auto": "Auto",
     "auto.on.title": "Reserva automática activa: toca para quitarla", "auto.off.title": "Reservar esta clase cada semana",
-    "status.full": "Lleno", "status.unavailable": "No disponible",
+    "status.unavailable": "No disponible",
     "empty.bookings": "No tienes reservas en los próximos días.", "empty.calendar": "Ninguna clase con estos filtros.",
     "empty.autos": "Aún no automatizas ninguna clase.<br>Activa <b>Auto</b> en una clase del calendario y la reservaré cada semana.",
     "empty.autos.filtered": "Ninguna automatización con estos filtros.",
@@ -414,6 +421,7 @@ const I18N = {
     "toast.activated": "Activada ✓", "toast.paused": "Pausada", "toast.booked": "Reservada ✓", "toast.cancelled": "Cancelada ✓",
     "toast.cancelledskip": "Cancelada ✓ La automatización de %s sigue activa para las próximas semanas, pero no reservará la del %s. Si quieres ir, resérvala tú.",
     "toast.error": "Error", "toast.bookedbang": "¡Reservada! ✓", "toast.autoadded": "Automatización añadida ✓", "toast.autoremoved": "Automatización quitada",
+    "action.joinwait": "Lista de espera", "action.leave": "Salir de la lista", "row.waitlisted": "En lista de espera · posición %d", "row.waitcount": "Lleno · %d en espera", "row.waitopen": "Lleno · lista de espera abierta", "status.closed": "Completa", "toast.waitlisted": "En lista de espera · posición %d ✓", "toast.leftwait": "Has salido de la lista de espera", "toast.autowaitlisted": "Automatización añadida · la clase se llenó: estás en lista de espera (posición %d)",
     "menu.notifications": "Notificaciones", "push.hint": "Te aviso al instante cuando reserve una clase o no consiga plaza.", "push.enable": "Activar notificaciones", "push.on": "Activadas en este dispositivo", "push.test": "Enviar prueba", "push.disable": "Desactivar", "push.ios": "Para recibir notificaciones en el iPhone, añade VirginBot a la pantalla de inicio y ábrela desde ahí.", "push.denied": "Las notificaciones están bloqueadas para VirginBot en los ajustes del dispositivo.", "push.unsupported": "Este navegador no admite notificaciones.", "toast.push.on": "Notificaciones activadas ✓", "toast.push.off": "Notificaciones desactivadas", "toast.push.test": "Prueba enviada",
     "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
     "login.email": "Email", "login.pass": "Contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
@@ -434,7 +442,7 @@ const I18N = {
     "loading.bookings": "Loading your bookings…", "error.calendar": "Couldn't load the calendar. Try again.",
     "row.booked": "Booked", "action.cancel": "Cancel", "action.book": "Book", "action.auto": "Auto",
     "auto.on.title": "Automatic booking on: tap to turn it off", "auto.off.title": "Book this class every week",
-    "status.full": "Full", "status.unavailable": "Unavailable",
+    "status.unavailable": "Unavailable",
     "empty.bookings": "You have no bookings in the coming days.", "empty.calendar": "No classes match these filters.",
     "empty.autos": "You haven't automated any class yet.<br>Turn on <b>Auto</b> on a class in the calendar and I'll book it every week.",
     "empty.autos.filtered": "No automations match these filters.",
@@ -446,6 +454,7 @@ const I18N = {
     "toast.activated": "Activated ✓", "toast.paused": "Paused", "toast.booked": "Booked ✓", "toast.cancelled": "Cancelled ✓",
     "toast.cancelledskip": "Cancelled ✓ Your %s automation stays on for the coming weeks, but it won't book the one on %s. If you want to go, book it yourself.",
     "toast.error": "Error", "toast.bookedbang": "Booked! ✓", "toast.autoadded": "Automation added ✓", "toast.autoremoved": "Automation removed",
+    "action.joinwait": "Join waitlist", "action.leave": "Leave waitlist", "row.waitlisted": "On the waitlist · position %d", "row.waitcount": "Full · %d waiting", "row.waitopen": "Full · waitlist open", "status.closed": "Fully booked", "toast.waitlisted": "On the waitlist · position %d ✓", "toast.leftwait": "You left the waitlist", "toast.autowaitlisted": "Automation added · the class filled up: you're on the waitlist (position %d)",
     "menu.notifications": "Notifications", "push.hint": "I'll tell you instantly when I book a class or can't get a spot.", "push.enable": "Turn on notifications", "push.on": "On for this device", "push.test": "Send a test", "push.disable": "Turn off", "push.ios": "To get notifications on iPhone, add VirginBot to your Home Screen and open it from there.", "push.denied": "Notifications are blocked for VirginBot in your device settings.", "push.unsupported": "This browser doesn't support notifications.", "toast.push.on": "Notifications on ✓", "toast.push.off": "Notifications off", "toast.push.test": "Test sent",
     "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Sign in", "login.loading": "Signing in…",
@@ -724,7 +733,10 @@ function rowHead(c) {
     <div class="cmain">
       <div class="cname" style="--c:${st.color}">${icon(st.icon)}<span>${esc(c.name)}</span></div>
       <div class="csub">${esc(shortClub(c.club))}${c.instructor ? ` · ${esc(c.instructor)}` : ""}</div>${
-      c.booked ? `<div class="cbk">${icon("i-check")}${t("row.booked")}</div>` : ""}`;
+      c.booked ? `<div class="cbk">${icon("i-check")}${t("row.booked")}</div>`
+      : c.waitlisted ? `<div class="cwl">${icon("i-hourglass")}${t("row.waitlisted", c.waitlistPos)}</div>`
+      : c.status === "waitlist" ? `<div class="cinfo">${c.waitlistCount ? t("row.waitcount", c.waitlistCount) : t("row.waitopen")}</div>`
+      : ""}`;
 }
 
 function sharedRow(c) {
@@ -752,22 +764,26 @@ function dayGroup(date, inner, n) {
     <div class="clist">${inner}</div></section>`;
 }
 
-const STATUS_PILL = { waitlist: ["wait", "status.full"], unavailable: ["off", "status.unavailable"] };
+const STATUS_PILL = { full: ["wait", "status.closed"], unavailable: ["off", "status.unavailable"] };
 
 function classRow(c) {
   const rule = ruleFor(c);
   let right;
   if (c.booked)
     right = `<button class="btn btn-danger push" onclick='act("unbook", ${payload(c)})'>${t("action.cancel")}</button>`;
+  else if (c.waitlisted)
+    right = `<button class="btn btn-danger push" onclick='act("unbook", ${payload(c)})'>${t("action.leave")}</button>`;
   else if (c.status === "bookable")
     right = `<button class="btn btn-primary push" onclick='act("book", ${payload(c)})'>${t("action.book")}</button>`;
+  else if (c.status === "waitlist")
+    right = `<button class="btn btn-wait push" onclick='act("book", ${payload(c)})'>${t("action.joinwait")}</button>`;
   else {
     const [cls, key] = STATUS_PILL[c.status] || ["off", "status.unavailable"];
     right = `<span class="pill ${cls} push">${t(key)}</span>`;
   }
   const auto = `<button class="autobtn${rule ? " on" : ""}" aria-pressed="${!!rule}" title="${t(rule ? "auto.on.title" : "auto.off.title")}"
       onclick='toggleAuto(${payload(c)}, ${!rule})'>${icon(rule ? "i-check" : "i-repeat")}${t("action.auto")}</button>`;
-  return `<div class="crow${c.booked ? " booked" : ""}">${rowHead(c)}<div class="cact">${auto}${right}</div></div></div>`;
+  return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${auto}${right}</div></div></div>`;
 }
 
 function renderClasses(rows, isBookings) {
@@ -959,7 +975,9 @@ async function act(kind, c) {
       method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c)
     })).json();
     if (res.ok) {
-      if (kind === "unbook" && res.skipped) {
+      if (kind === "book" && res.waitlisted) toast(t("toast.waitlisted", res.position));
+      else if (kind === "unbook" && c.waitlisted) toast(t("toast.leftwait"));
+      else if (kind === "unbook" && res.skipped) {
         const day = new Date(c.date + "T00:00").toLocaleDateString(loc(), { weekday: "long", day: "numeric", month: "long" });
         toast(t("toast.cancelledskip", c.name, day), false, 9000);
       } else toast(kind === "book" ? t("toast.booked") : t("toast.cancelled"));
@@ -972,7 +990,8 @@ async function toggleAuto(c, on) {
   try {
     if (on) {
       const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)})).json();
-      toast(res.booked ? t("toast.bookedbang") : t("toast.autoadded"));
+      toast(res.booked ? t("toast.bookedbang") : res.waitlistPos ? t("toast.autowaitlisted", res.waitlistPos) : t("toast.autoadded"),
+        false, res.waitlistPos ? 7000 : 3500);
       autos = (await (await fetch(`/api/automations`)).json()) || [];
       if (res.booked) { load(); return; } // reload the calendar to reflect the booking
       render();

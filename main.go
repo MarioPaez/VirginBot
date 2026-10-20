@@ -124,9 +124,15 @@ func main() {
 	// with each user's authenticated client and pushes the outcome.
 	engine := automation.NewEngine(store, srv.FreshDayFor, func(userID int64, clubID, classID, sessionID int, date string) error {
 		// auth.Do re-logs in and retries if the token is expired (401).
+		var res vapi.BookResult
 		bookErr := auth.Do(userID, func(client *vapi.Client) error {
-			return client.Book(clubID, classID, sessionID, date)
+			var err error
+			res, err = client.Book(clubID, classID, sessionID, date)
+			return err
 		})
+		if bookErr == nil && res.Waitlisted {
+			bookErr = automation.ErrWaitlisted{Position: res.Position}
+		}
 		// ALWAYS reconcile the bookings: even if the API returns an error, the
 		// booking may have gone through; the engine's next round detects it (overlay).
 		srv.InvalidateUser(userID)

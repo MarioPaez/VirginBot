@@ -43,7 +43,13 @@ type Class struct {
 	SessionID  int    `json:"sessionId"`  // session id (used to book/cancel)
 	BookingID  int    `json:"bookingId"`  // member's booking id (used to cancel), only if Booked
 	Booked     bool   `json:"booked"`     // true if already booked by me
-	// Status: "bookable" (bookable now), "booked" (booked by me),
-	// "waitlist" (full, waiting list), "unavailable" (window not open / other).
+	// Status: "bookable" (bookable now), "booked" (booked by me), "waitlisted"
+	// (I'm on its waitlist), "waitlist" (full, waitlist open), "full" (full and
+	// waitlist full or closed), "unavailable" (window not open / other).
 	Status string `json:"status"`
+
+	Waitlisted    bool `json:"waitlisted"`    // I'm on its waitlist
+	WaitlistPos   int  `json:"waitlistPos"`   // my position (1 = next in line), if Waitlisted
+	WaitlistCount int  `json:"waitlistCount"` // people waiting
+	WaitlistCap   int  `json:"waitlistCap"`   // waitlist size
 }

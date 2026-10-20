@@ -112,6 +112,35 @@ func TestPushOnBooked(t *testing.T) {
 	}
 }
 
+// If the spot goes between the fetch and the POST, Virgin waitlists us: the
+// engine stops for that occurrence (no more POSTs, no "couldn't book" later)
+// and tells the user their position.
+func TestWaitlistedStopsAndNotifies(t *testing.T) {
+	loc := mustLoc(t)
+	o := sampleOcc(loc)
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
+		return []calendar.Class{{
+			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
+			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
+		}}, nil
+	}
+	var posts int
+	book := func(int64, int, int, int, string) error { posts++; return ErrWaitlisted{Position: 2} }
+	e := NewEngine(nil, fetch, book, func(int64) string { return "es" })
+	e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
+	var titles []string
+	e.SetPush(func(_ int64, title, _, _ string) { titles = append(titles, title) })
+
+	e.maybeFire(o, time.Date(2026, 6, 27, 18, 15, 1, 0, loc)) // T-2
+	e.maybeFire(o, time.Date(2026, 6, 28, 18, 15, 1, 0, loc)) // T-1, the last fire
+	if posts != 1 {
+		t.Fatalf("must stop after being waitlisted; POSTs=%d", posts)
+	}
+	if len(titles) != 1 || titles[0] != "En lista de espera · posición 2" {
+		t.Fatalf("expected one waitlist notice with the position, got %q", titles)
+	}
+}
+
 func TestFailureNoticeAfterLastTrigger(t *testing.T) {
 	loc := mustLoc(t)
 	o := sampleOcc(loc)

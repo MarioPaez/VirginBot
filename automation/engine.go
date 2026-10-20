@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -52,10 +53,20 @@ type Engine struct {
 
 type occState struct {
 	booked       bool
+	waitlisted   bool // the spot went at the last second and Virgin waitlisted us instead: stop, they'll promote us
 	attempts     int
 	lastError    string
 	missNotified bool
 	lastFired    time.Time // last fire already executed (avoids repeating it)
+}
+
+// ErrWaitlisted is what the book function returns when Virgin put the member on
+// the class's waitlist instead of booking (the spot went between the calendar
+// fetch and the POST).
+type ErrWaitlisted struct{ Position int }
+
+func (e ErrWaitlisted) Error() string {
+	return fmt.Sprintf("joined the waitlist instead (position %d)", e.Position)
 }
 
 func NewEngine(
@@ -84,12 +95,12 @@ func NewEngine(
 func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.push = fn }
 
 // pushOutcome sends the short version of a booking outcome to the user's devices.
-func (e *Engine) pushOutcome(o occ, titleKey, url string) {
+func (e *Engine) pushOutcome(o occ, url, titleKey string, args ...any) {
 	if e.push == nil {
 		return
 	}
 	lang := e.langOf(o.rule.UserID)
-	e.push(o.rule.UserID, i18n.T(lang, titleKey),
+	e.push(o.rule.UserID, i18n.T(lang, titleKey, args...),
 		i18n.T(lang, "push.class", o.rule.Name, o.rule.Club, i18n.FormatDateTime(lang, o.start)), url)
 }
 
@@ -175,7 +186,7 @@ func (e *Engine) occurrences(now time.Time) []occ {
 				continue
 			}
 			o := occ{rule: r, date: date, start: start}
-			if st := e.get(o.stateKey()); st != nil && st.booked {
+			if st := e.get(o.stateKey()); st != nil && (st.booked || st.waitlisted) {
 				continue
 			}
 			if e.store.Skipped(r.UserID, r.ID, date) { // cancelled by the user: don't re-book
@@ -192,7 +203,7 @@ func (e *Engine) occurrences(now time.Time) []occ {
 // notifies the user.
 func (e *Engine) maybeFire(o occ, now time.Time) {
 	st := e.ensureState(o)
-	if st.booked {
+	if st.booked || st.waitlisted {
 		return
 	}
 	trs := o.triggers()
@@ -233,7 +244,7 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	last := o.start.Add(-24 * time.Hour)
 	if !st.booked && !st.missNotified && !dueT.Before(last) {
 		st.missNotified = true
-		e.pushOutcome(o, "push.failed.title", "/?view=automations")
+		e.pushOutcome(o, "/?view=automations", "push.failed.title")
 	}
 }
 
@@ -282,7 +293,15 @@ func (e *Engine) attempt(o occ, st *occState) {
 				for bi, c := range beds {
 					st.attempts++
 					log.Printf("automation: %s — round %d/%d bed %d/%d (classId=%d sessionId=%d), booking…", tag, round+1, e.rounds, bi+1, len(beds), c.ClassID, c.SessionID)
-					if err := e.book(o.rule.UserID, c.ClubID, c.ClassID, c.SessionID, o.date); err != nil {
+					err := e.book(o.rule.UserID, c.ClubID, c.ClassID, c.SessionID, o.date)
+					var wl ErrWaitlisted
+					if errors.As(err, &wl) {
+						st.waitlisted = true
+						log.Printf("automation: %s — the spot went: WAITLISTED at position %d, stopping", tag, wl.Position)
+						e.pushOutcome(o, "/?view=bookings", "push.waitlisted.title", wl.Position)
+						return
+					}
+					if err != nil {
 						st.lastError = err.Error()
 						log.Printf("automation: %s — round %d/%d bed %d/%d: booking FAILED: %v", tag, round+1, e.rounds, bi+1, len(beds), err)
 						continue
@@ -398,7 +417,7 @@ func (e *Engine) langOf(userID int64) i18n.Lang {
 // notifyBooked tells the member about a successful booking (direct, confirmed
 // after an API error, or found in the final reconciliation).
 func (e *Engine) notifyBooked(o occ, st *occState) {
-	e.pushOutcome(o, "push.booked.title", "/?view=bookings")
+	e.pushOutcome(o, "/?view=bookings", "push.booked.title")
 }
 
 // ---- state ----

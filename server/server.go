@@ -66,6 +66,7 @@ func New(db *sql.DB, auth *Auth, accounts *account.Store, clubs []int, keep func
 		s.warm()
 		s.dailyRefreshLoop()
 	}()
+	go s.waitlistLoop()
 	return s
 }
 
@@ -75,6 +76,62 @@ func (s *Server) warm() {
 	for _, uid := range s.accounts.ListUserIDs() {
 		s.fetchBookings(uid)
 	}
+}
+
+// Waitlist sync: Virgin promotes people from the waitlist at any time (someone
+// cancels), so users with a waitlist place are re-synced on their own to notice
+// (and push) it soon. Closer to the class, cancellations are more frequent.
+const (
+	waitlistTick = 2 * time.Minute  // loop period, and the sync period near the class
+	waitlistFar  = 10 * time.Minute // sync period otherwise
+	waitlistNear = 3 * time.Hour    // "near the class"
+)
+
+func (s *Server) waitlistLoop() {
+	last := map[int64]time.Time{}
+	for {
+		time.Sleep(waitlistTick)
+		now := time.Now().In(s.loc)
+		for uid, next := range s.nextWaitlistedClass(now) {
+			every := waitlistFar
+			if next.Sub(now) <= waitlistNear {
+				every = waitlistTick
+			}
+			if now.Sub(last[uid]) >= every-time.Second {
+				last[uid] = now
+				s.fetchBookings(uid) // reconciling pushes "you're in" on a promotion
+			}
+		}
+	}
+}
+
+// nextWaitlistedClass maps each user with an upcoming waitlist place to the
+// start of the nearest one. The rows are drained before returning: the pool has
+// a single connection and the caller queries again.
+func (s *Server) nextWaitlistedClass(now time.Time) map[int64]time.Time {
+	out := map[int64]time.Time{}
+	rows, err := s.db.Query(`SELECT user_id, date, start FROM bookings WHERE status = 'waitlisted' AND date >= ?`,
+		now.Format("2006-01-02"))
+	if err != nil {
+		log.Printf("waitlist sync: %v", err)
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		var date, start string
+		if rows.Scan(&uid, &date, &start) != nil {
+			continue
+		}
+		t, err := time.ParseInLocation("2006-01-02 15:04", date+" "+start, s.loc)
+		if err != nil || !t.After(now) {
+			continue
+		}
+		if cur, ok := out[uid]; !ok || t.Before(cur) {
+			out[uid] = t
+		}
+	}
+	return out
 }
 
 // dailyRefreshLoop purges past bookings and refreshes each user's at 00:00
@@ -227,7 +284,7 @@ func (s *Server) downloadClasses(userID int64, clubs []int, start, end time.Time
 // time) into a single row —e.g. the Solarium has many "beds", each a distinct
 // bookable class— preferring the most bookable instance.
 func dedupe(classes []calendar.Class) []calendar.Class {
-	rank := map[string]int{"bookable": 3, "waitlist": 2, "unavailable": 1}
+	rank := map[string]int{"bookable": 4, "waitlist": 3, "full": 2, "unavailable": 1}
 	best := map[string]int{} // key -> index in out
 	var out []calendar.Class
 	for _, c := range classes {
@@ -244,15 +301,17 @@ func dedupe(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// overlayBooked marks as booked (with the real ids to cancel) the classes the
-// user already has in the bookings table.
+// overlayBooked marks the classes the user already has in the bookings table:
+// booked, or waitlisted with their position (with the real ids to cancel/leave).
 func (s *Server) overlayBooked(userID int64, classes []calendar.Class) []calendar.Class {
 	for i := range classes {
 		c := &classes[i]
-		if clubID, classID, sessionID, bid, ok := s.bookingInfo(userID, c.Name, c.Club, c.Date, c.Start); ok {
-			c.Booked = true
-			c.Status = "booked"
-			c.ClubID, c.ClassID, c.SessionID, c.BookingID = clubID, classID, sessionID, bid
+		if b, ok := s.bookingRow(userID, c.Name, c.Club, c.Date, c.Start); ok {
+			c.Status = b.Status
+			c.Booked = b.Status == "booked"
+			c.Waitlisted = b.Status == "waitlisted"
+			c.WaitlistPos = b.WaitlistPos
+			c.ClubID, c.ClassID, c.SessionID, c.BookingID = b.ClubID, b.ClassID, b.SessionID, b.BookingID
 		}
 	}
 	return classes
@@ -340,29 +399,79 @@ func (s *Server) fetchBookings(userID int64) {
 	s.reconcileBookings(userID, now.Format("2006-01-02"), end.Format("2006-01-02"), booked)
 }
 
-func (s *Server) reconcileBookings(userID int64, start, end string, booked []calendar.Class) {
+// reconcileBookings replaces the user's bookings in [start, end] with what Virgin
+// reports (active bookings and waitlist places) and returns the occurrences that
+// went from the waitlist to booked (already notified).
+func (s *Server) reconcileBookings(userID int64, start, end string, booked []calendar.Class) (promoted []calendar.Class) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		log.Printf("reconcile bookings u%d: %v", userID, err)
-		return
+		return nil
 	}
 	defer tx.Rollback()
+	// Occurrences the user was waitlisted for: if one is now an active booking,
+	// they got in. Read through the tx (the pool has a single connection).
+	wasWaitlisted := map[string]bool{}
+	if rows, err := tx.Query(`SELECT name, club, date, start FROM bookings
+		 WHERE user_id = ? AND date >= ? AND date <= ? AND status = 'waitlisted'`, userID, start, end); err == nil {
+		for rows.Next() {
+			var n, c, d, st string
+			if rows.Scan(&n, &c, &d, &st) == nil {
+				wasWaitlisted[n+"|"+c+"|"+d+"|"+st] = true
+			}
+		}
+		rows.Close()
+	}
 	if _, err := tx.Exec(`DELETE FROM bookings WHERE user_id = ? AND date >= ? AND date <= ?`, userID, start, end); err != nil {
 		log.Printf("reconcile (delete) u%d: %v", userID, err)
-		return
+		return nil
 	}
 	now := time.Now().Format(time.RFC3339)
 	for _, c := range booked {
+		status := "booked"
+		if c.Waitlisted {
+			status = "waitlisted"
+		} else if wasWaitlisted[c.Name+"|"+c.Club+"|"+c.Date+"|"+c.Start] {
+			promoted = append(promoted, c)
+		}
+		// An active booking wins over a waitlist place for the same occurrence.
 		if _, err := tx.Exec(
-			`INSERT INTO bookings (user_id, name, club, date, start, end_time, instructor, club_id, class_id, session_id, booking_id, created)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(user_id, name, club, date, start) DO NOTHING`,
-			userID, c.Name, c.Club, c.Date, c.Start, c.End, c.Instructor, c.ClubID, c.ClassID, c.SessionID, c.BookingID, now); err != nil {
+			`INSERT INTO bookings (user_id, name, club, date, start, end_time, instructor, club_id, class_id, session_id, booking_id, status, waitlist_pos, created)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(user_id, name, club, date, start) DO UPDATE SET
+			   end_time = excluded.end_time, instructor = excluded.instructor, club_id = excluded.club_id,
+			   class_id = excluded.class_id, session_id = excluded.session_id, booking_id = excluded.booking_id,
+			   status = excluded.status, waitlist_pos = excluded.waitlist_pos
+			 WHERE bookings.status <> 'booked'`,
+			userID, c.Name, c.Club, c.Date, c.Start, c.End, c.Instructor, c.ClubID, c.ClassID, c.SessionID, c.BookingID,
+			status, c.WaitlistPos, now); err != nil {
 			log.Printf("reconcile (insert) u%d: %v", userID, err)
-			return
+			return nil
 		}
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		log.Printf("reconcile (commit) u%d: %v", userID, err)
+		return nil
+	}
+	for _, c := range promoted {
+		s.notifyPromoted(userID, c)
+	}
+	return promoted
+}
+
+// notifyPromoted tells the user they moved from the waitlist into the class.
+func (s *Server) notifyPromoted(userID int64, c calendar.Class) {
+	log.Printf("waitlist: u%d got into %s · %s %s %s", userID, c.Name, c.Club, c.Date, c.Start)
+	if s.push == nil {
+		return
+	}
+	lang := s.langOf(userID)
+	when, _ := time.ParseInLocation("2006-01-02 15:04", c.Date+" "+c.Start, s.loc)
+	go s.push.Notify(userID, push.Message{
+		Title: i18n.T(lang, "push.promoted.title"),
+		Body:  i18n.T(lang, "push.class", c.Name, c.Club, i18n.FormatDateTime(lang, when)),
+		URL:   "/?view=bookings",
+	})
 }
 
 func (s *Server) deleteBooking(userID int64, name, club, date, start string) {
@@ -389,7 +498,7 @@ func (s *Server) unskip(userID int64, req bookRequest) {
 // listBookings returns the user's future bookings as Class values.
 func (s *Server) listBookings(userID int64) []calendar.Class {
 	rows, err := s.db.Query(
-		`SELECT name, club, date, start, end_time, instructor, club_id, class_id, session_id, booking_id
+		`SELECT name, club, date, start, end_time, instructor, club_id, class_id, session_id, booking_id, status, waitlist_pos
 		 FROM bookings WHERE user_id = ? AND date >= ? ORDER BY date, start`, userID, s.today())
 	if err != nil {
 		log.Printf("list bookings u%d: %v", userID, err)
@@ -399,27 +508,32 @@ func (s *Server) listBookings(userID int64) []calendar.Class {
 	out := []calendar.Class{}
 	for rows.Next() {
 		var c calendar.Class
-		if err := rows.Scan(&c.Name, &c.Club, &c.Date, &c.Start, &c.End, &c.Instructor, &c.ClubID, &c.ClassID, &c.SessionID, &c.BookingID); err != nil {
+		if err := rows.Scan(&c.Name, &c.Club, &c.Date, &c.Start, &c.End, &c.Instructor, &c.ClubID, &c.ClassID, &c.SessionID, &c.BookingID,
+			&c.Status, &c.WaitlistPos); err != nil {
 			continue
 		}
-		c.Booked = true
-		c.Status = "booked"
+		c.Booked = c.Status == "booked"
+		c.Waitlisted = c.Status == "waitlisted"
 		out = append(out, c)
 	}
 	return s.futureOnly(out)
 }
 
-// bookingInfo returns the member's booking ids for an occurrence.
-func (s *Server) bookingInfo(userID int64, name, club, date, start string) (clubID, classID, sessionID, bookingID int, ok bool) {
+// bookingRow returns the member's booking (active or waitlist place) for an
+// occurrence, with the ids needed to cancel / leave it.
+func (s *Server) bookingRow(userID int64, name, club, date, start string) (b calendar.Class, ok bool) {
 	err := s.db.QueryRow(
-		`SELECT club_id, class_id, session_id, booking_id FROM bookings WHERE user_id=? AND name=? AND club=? AND date=? AND start=?`,
-		userID, name, club, date, start).Scan(&clubID, &classID, &sessionID, &bookingID)
-	return clubID, classID, sessionID, bookingID, err == nil
+		`SELECT club_id, class_id, session_id, booking_id, status, waitlist_pos
+		 FROM bookings WHERE user_id=? AND name=? AND club=? AND date=? AND start=?`,
+		userID, name, club, date, start).Scan(&b.ClubID, &b.ClassID, &b.SessionID, &b.BookingID, &b.Status, &b.WaitlistPos)
+	return b, err == nil
 }
 
+// isBooked reports an ACTIVE booking (a waitlist place doesn't count: the
+// engine must still try to book that occurrence).
 func (s *Server) isBooked(userID int64, name, club, date, start string) bool {
-	_, _, _, _, ok := s.bookingInfo(userID, name, club, date, start)
-	return ok
+	b, ok := s.bookingRow(userID, name, club, date, start)
+	return ok && b.Status == "booked"
 }
 
 // ---- bookings (actions) ----
@@ -435,6 +549,7 @@ type bookRequest struct {
 	Start     string `json:"start"`
 	End       string `json:"end"`
 	Booked    bool   `json:"booked"`
+	Status    string `json:"status"`
 }
 
 func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
@@ -452,17 +567,24 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	beds := bookableMatches(classes, req.Name, req.Club, req.Start, req.Date)
+	// A free spot first; if the class is full, the same call joins its waitlist.
+	beds := matchesWithStatus(classes, req.Name, req.Club, req.Start, req.Date, "bookable")
+	if len(beds) == 0 {
+		beds = matchesWithStatus(classes, req.Name, req.Club, req.Start, req.Date, "waitlist")
+	}
 	if len(beds) == 0 {
 		writeJSON(w, map[string]any{"ok": false, "error": "no bookable slot anymore; reload the calendar"})
 		return
 	}
 	// Try each instance until the POST accepts (Solarium: several "beds"; normal
 	// class: only one).
+	var res vapi.BookResult
 	var bookErr error
 	for _, c := range beds {
 		bookErr = s.auth.Do(userID, func(client *vapi.Client) error {
-			return client.Book(c.ClubID, c.ClassID, c.SessionID, req.Date)
+			var err error
+			res, err = client.Book(c.ClubID, c.ClassID, c.SessionID, req.Date)
+			return err
 		})
 		if bookErr == nil {
 			break
@@ -474,19 +596,23 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	s.unskip(userID, req)
 	s.InvalidateUser(userID)
+	if res.Waitlisted {
+		writeJSON(w, map[string]any{"ok": true, "waitlisted": true, "position": res.Position})
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// bookableMatches returns the bookable instances (status bookable, valid ids)
+// matchesWithStatus returns the instances with the given status and valid ids
 // matching name+club+date+start of the already-downloaded day. Re-resolving this
 // way avoids booking a stale sessionId the FE sent from its cache. The date check
 // guards against vapi bleeding a neighboring day's session into a single-day
 // query (same name/club/start every day, e.g. the Solarium).
-func bookableMatches(classes []calendar.Class, name, club, start, date string) []calendar.Class {
+func matchesWithStatus(classes []calendar.Class, name, club, start, date, status string) []calendar.Class {
 	var out []calendar.Class
 	for _, c := range classes {
 		if strings.EqualFold(c.Name, name) && strings.EqualFold(c.Club, club) && c.Start == start && c.Date == date &&
-			c.Status == "bookable" && c.ClassID != 0 && c.SessionID != 0 {
+			c.Status == status && c.ClassID != 0 && c.SessionID != 0 {
 			out = append(out, c)
 		}
 	}
@@ -562,9 +688,9 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.unskip(userID, req)               // automating this occurrence again overrides a past cancellation
-		booked := s.tryBookNow(userID, req) // the FE shows the outcome right away
-		writeJSON(w, map[string]any{"rule": rule, "booked": booked})
+		s.unskip(userID, req)                        // automating this occurrence again overrides a past cancellation
+		booked, waitPos := s.tryBookNow(userID, req) // the FE shows the outcome right away
+		writeJSON(w, map[string]any{"rule": rule, "booked": booked, "waitlistPos": waitPos})
 	case http.MethodPatch:
 		id := r.URL.Query().Get("id")
 		if _, found := s.store.Get(userID, id); !found {
@@ -589,18 +715,28 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) tryBookNow(userID int64, req bookRequest) bool {
-	if req.ClassID == 0 || req.SessionID == 0 || req.Booked {
-		return false
+// tryBookNow books the clicked occurrence right away when it has a free spot.
+// Only then: on a full class the booking call would silently join the waitlist.
+// If the spot went in the meantime and Virgin waitlisted it, it reports the
+// position instead of a booking.
+func (s *Server) tryBookNow(userID int64, req bookRequest) (booked bool, waitlistPos int) {
+	if req.ClassID == 0 || req.SessionID == 0 || req.Booked || req.Status != "bookable" {
+		return false, 0
 	}
+	var res vapi.BookResult
 	err := s.auth.Do(userID, func(client *vapi.Client) error {
-		return client.Book(req.ClubID, req.ClassID, req.SessionID, req.Date)
+		var err error
+		res, err = client.Book(req.ClubID, req.ClassID, req.SessionID, req.Date)
+		return err
 	})
 	if err != nil {
-		return false
+		return false, 0
 	}
 	s.InvalidateUser(userID)
-	return true
+	if res.Waitlisted {
+		return false, res.Position
+	}
+	return true, 0
 }
 
 type automationView struct {

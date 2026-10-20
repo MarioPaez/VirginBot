@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS bookings (
     class_id   INTEGER NOT NULL DEFAULT 0,
     session_id INTEGER NOT NULL DEFAULT 0,
     booking_id INTEGER NOT NULL DEFAULT 0,
+    status     TEXT NOT NULL DEFAULT 'booked', -- 'booked' or 'waitlisted'
+    waitlist_pos INTEGER NOT NULL DEFAULT 0,  -- position when waitlisted (1 = next)
     created    TEXT NOT NULL,
     PRIMARY KEY (user_id, name, club, date, start)
 );
@@ -125,6 +127,13 @@ func migrate(d *sql.DB) error {
 		}
 	}
 	if err := ensureColumn(d, "bookings", "instructor", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// Waitlist places live in bookings too, told apart by status.
+	if err := ensureColumn(d, "bookings", "status", "TEXT NOT NULL DEFAULT 'booked'"); err != nil {
+		return err
+	}
+	if err := ensureColumn(d, "bookings", "waitlist_pos", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	// i18n: user's preferred language (empty = not detected yet).

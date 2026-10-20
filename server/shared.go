@@ -40,7 +40,7 @@ func (s *Server) handleSharedBookings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listSharedBookings() []sharedClass {
 	rows, err := s.db.Query(
 		`SELECT user_id, name, club, date, start, end_time, instructor
-		 FROM bookings WHERE date >= ? ORDER BY date, start, name, club, user_id`, s.today())
+		 FROM bookings WHERE date >= ? AND status = 'booked' ORDER BY date, start, name, club, user_id`, s.today())
 	if err != nil {
 		log.Printf("list shared bookings: %v", err)
 		return []sharedClass{}

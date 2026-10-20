@@ -96,6 +96,8 @@ type apiClass struct {
 	BookableStatus  string          `json:"bookableStatus"`
 	StudioName      string          `json:"studioName"`
 	Instructors     []apiInstructor `json:"instructors"`
+	WaitlistCount   int             `json:"waitlistCount"`
+	WaitlistCap     int             `json:"waitlistCapacity"`
 }
 
 func instructorsOf(ins []apiInstructor) string {
@@ -133,7 +135,8 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 				Name: k.Name, Club: calendar.ClubNames[clubID], Studio: k.StudioName,
 				Instructor: instructorsOf(k.Instructors),
 				ClubID:     clubID, ClassID: k.ID, SessionID: k.SessionID,
-				Status: mapStatus(k.BookableStatus),
+				Status:        mapStatus(k.BookableStatus),
+				WaitlistCount: k.WaitlistCount, WaitlistCap: k.WaitlistCap,
 			})
 		}
 	}
@@ -151,44 +154,98 @@ type apiBooking struct {
 		ClassTime       string          `json:"classTime"`
 		SessionDuration int             `json:"sessionDuration"`
 		Instructors     []apiInstructor `json:"instructors"`
+		WaitlistPos     int             `json:"waitlistPosition"` // 1 = next in line; 0 on active bookings
 	} `json:"class"`
 }
 
-// MyBookings returns the member's active bookings in the given range, as Class
-// with Booked=true and the IDs needed to cancel.
+// MyBookings returns the member's bookings in the given range as Class values
+// with the IDs needed to cancel: active ones (Booked) and waitlist places
+// (Waitlisted, with the position).
 func (c *Client) MyBookings(start, end time.Time) ([]calendar.Class, error) {
 	q := url.Values{
 		"startDate": {start.Format("2006-01-02")},
 		"endDate":   {end.Format("2006-01-02")},
 	}
 	var resp struct {
-		ActiveBookings []apiBooking `json:"activeBookings"`
+		ActiveBookings   []apiBooking `json:"activeBookings"`
+		WaitlistBookings []apiBooking `json:"waitinglistBookings"`
 	}
 	if err := c.do(http.MethodGet, "/member/bookings", q, nil, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]calendar.Class, 0, len(resp.ActiveBookings))
-	for _, b := range resp.ActiveBookings {
+	out := make([]calendar.Class, 0, len(resp.ActiveBookings)+len(resp.WaitlistBookings))
+	add := func(b apiBooking, waitlisted bool) {
 		start := hhmm(b.Class.ClassTime)
-		out = append(out, calendar.Class{
+		c := calendar.Class{
 			Date: b.BookingDate, Start: start, End: addMinutes(start, b.Class.SessionDuration),
 			Name: b.Class.Name, Club: calendar.ClubNames[b.Class.ClubID],
 			Instructor: instructorsOf(b.Class.Instructors),
 			ClubID:     b.Class.ClubID, ClassID: b.Class.ID, SessionID: b.Class.SessionID,
 			BookingID: b.ID, Booked: true, Status: "booked",
-		})
+		}
+		if waitlisted {
+			c.Booked, c.Status = false, "waitlisted"
+			c.Waitlisted, c.WaitlistPos = true, b.Class.WaitlistPos
+		}
+		out = append(out, c)
+	}
+	for _, b := range resp.ActiveBookings {
+		add(b, false)
+	}
+	for _, b := range resp.WaitlistBookings {
+		add(b, true)
 	}
 	return out, nil
 }
 
-// Book books a class (POST with an empty body).
-func (c *Client) Book(clubID, classID, sessionID int, date string) error {
-	q := url.Values{"date": {date}}
-	path := fmt.Sprintf("/clubs/%d/classes/%d/sessions/%d", clubID, classID, sessionID)
-	return c.do(http.MethodPost, path, q, nil, nil)
+// BookResult is what a booking POST did: on a full class with an open waitlist
+// Virgin doesn't fail, it puts the member on the waitlist instead.
+type BookResult struct {
+	BookingID  int
+	Waitlisted bool
+	Position   int // waitlist position (1 = next), if Waitlisted
 }
 
-// Cancel cancels a booking.
+// Book books a class (POST with an empty body). On a full class with an open
+// waitlist the same call joins the waitlist: the response says so
+// ({"status":"OVERBOOKED_WAITINGLIST","waitingListIndex":3}).
+func (c *Client) Book(clubID, classID, sessionID int, date string) (BookResult, error) {
+	q := url.Values{"date": {date}}
+	path := fmt.Sprintf("/clubs/%d/classes/%d/sessions/%d", clubID, classID, sessionID)
+	var resp bookResponse
+	if err := c.do(http.MethodPost, path, q, nil, &resp); err != nil {
+		return BookResult{}, err
+	}
+	return resp.result(), nil
+}
+
+// bookResponse decodes the booking POST's answer leniently: the booking has
+// already happened, so an unexpected body must not turn it into an error.
+type bookResponse struct {
+	BookingID int    `json:"bookingId"`
+	Status    string `json:"status"`
+	Index     int    `json:"waitingListIndex"`
+}
+
+func (r bookResponse) result() BookResult {
+	return BookResult{
+		BookingID:  r.BookingID,
+		Waitlisted: strings.Contains(strings.ToUpper(r.Status), "WAITINGLIST"),
+		Position:   r.Index,
+	}
+}
+
+func (r *bookResponse) UnmarshalJSON(b []byte) error {
+	type plain bookResponse
+	var p plain
+	if json.Unmarshal(b, &p) == nil {
+		*r = bookResponse(p)
+	}
+	return nil
+}
+
+// Cancel cancels a booking, or leaves a waitlist (same call, the waitlist
+// booking's id).
 func (c *Client) Cancel(sessionID, bookingID, clubID, classID int, date string) error {
 	q := url.Values{
 		"date":               {date},
@@ -279,6 +336,8 @@ func mapStatus(bookable string) string {
 		return "bookable"
 	case "Waitlist":
 		return "waitlist"
+	case "Full":
+		return "full"
 	case "Booked":
 		return "booked"
 	default:

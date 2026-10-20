@@ -110,7 +110,7 @@ func (s *Server) handleAdminBookings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listAllBookings() []adminBooking {
 	rows, err := s.db.Query(
 		`SELECT user_id, name, club, date, start, end_time, instructor, club_id, class_id, session_id, booking_id
-		 FROM bookings WHERE date >= ? ORDER BY user_id, date, start`, s.today())
+		 FROM bookings WHERE date >= ? AND status = 'booked' ORDER BY user_id, date, start`, s.today())
 	if err != nil {
 		return []adminBooking{}
 	}
