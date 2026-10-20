@@ -146,6 +146,16 @@
   .pill.off { background:var(--surface-2); color:var(--muted); }
   .pill.err { background:rgba(248,113,113,.12); color:#fca5a5; }
 
+  /* ---- Stats (bookings view) ---- */
+  .stats { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:14px; margin-top:16px; }
+  .stats-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .stat { text-align:center; min-width:0; }
+  .stat .v { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.2; }
+  .stat .k { color:var(--muted); font-size:11.5px; line-height:1.25; margin-top:2px; }
+  .stats-foot { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font-size:13px;
+                display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .stats-foot b { color:var(--text); font-weight:600; }
+
   /* ---- Automations ---- */
   .autos-filters { display:grid; gap:10px; margin-top:12px; }
   .auto-list { display:grid; gap:10px; }
@@ -424,6 +434,7 @@ const I18N = {
     "action.watch": "Osserva", "watch.on.title": "La sto osservando: tocca per smettere", "watch.off.title": "Prenotala da sola se si libera un posto", "row.watching": "Osservo se si libera un posto", "toast.watching": "Ok: se si libera un posto la prenoto (fino a %d h prima)", "toast.unwatched": "Non la osservo più", "watch.section": "Osservate", "set.full": "Se un'automazione è ancora piena 24 h prima", "set.full.notify": "Avvisami", "set.full.waitlist": "Lista d'attesa", "set.full.watch": "Continua a osservare", "toast.saved": "Salvato ✓",
     "set.reminder": "Promemoria prima di ogni lezione", "set.off": "No", "set.hours": "%d h prima",
     "set.cal": "Calendario del telefono", "cal.hint": "Le tue prenotazioni nel calendario del telefono, sempre aggiornate. Il link è privato: non condividerlo.", "cal.add": "Aggiungi al calendario", "cal.copy": "Copia link", "cal.reset": "Nuovo link", "toast.copied": "Link copiato ✓", "toast.calreset": "Nuovo link creato: quello vecchio non funziona più",
+    "stats.month": "Questo mese", "stats.total": "Totale", "stats.bybot": "Da VirginBot", "stats.streak": "Settimane di fila", "stats.top": "La più frequente: <b>%s</b> (%d)", "stats.since": "Dal %s",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -463,6 +474,7 @@ const I18N = {
     "action.watch": "Vigilar", "watch.on.title": "La estoy vigilando: toca para dejarlo", "watch.off.title": "Resérvala sola si se libera una plaza", "row.watching": "Vigilando por si se libera una plaza", "toast.watching": "Hecho: si se libera una plaza la reservo (hasta %d h antes)", "toast.unwatched": "Ya no la vigilo", "watch.section": "Vigilando", "set.full": "Si una automatización sigue llena 24 h antes", "set.full.notify": "Avísame", "set.full.waitlist": "Lista de espera", "set.full.watch": "Seguir vigilando", "toast.saved": "Guardado ✓",
     "set.reminder": "Recordatorio antes de cada clase", "set.off": "No", "set.hours": "%d h antes",
     "set.cal": "Calendario del móvil", "cal.hint": "Tus reservas en el calendario del móvil, siempre al día. El enlace es privado: no lo compartas.", "cal.add": "Añadir al calendario", "cal.copy": "Copiar enlace", "cal.reset": "Nuevo enlace", "toast.copied": "Enlace copiado ✓", "toast.calreset": "Nuevo enlace creado: el anterior ya no funciona",
+    "stats.month": "Este mes", "stats.total": "Total", "stats.bybot": "Por VirginBot", "stats.streak": "Semanas seguidas", "stats.top": "La que más: <b>%s</b> (%d)", "stats.since": "Desde el %s",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -502,6 +514,7 @@ const I18N = {
     "action.watch": "Watch", "watch.on.title": "Watching it: tap to stop", "watch.off.title": "Book it on its own if a spot frees up", "row.watching": "Watching for a freed spot", "toast.watching": "Done: if a spot frees up I'll book it (until %d h before)", "toast.unwatched": "Not watching it anymore", "watch.section": "Watching", "set.full": "If an automation is still full 24 h before", "set.full.notify": "Tell me", "set.full.waitlist": "Waitlist", "set.full.watch": "Keep watching", "toast.saved": "Saved ✓",
     "set.reminder": "Reminder before each class", "set.off": "Off", "set.hours": "%d h before",
     "set.cal": "Phone calendar", "cal.hint": "Your bookings in your phone's calendar, always up to date. The link is private: don't share it.", "cal.add": "Add to calendar", "cal.copy": "Copy link", "cal.reset": "New link", "toast.copied": "Link copied ✓", "toast.calreset": "New link created: the old one stopped working",
+    "stats.month": "This month", "stats.total": "Total", "stats.bybot": "By VirginBot", "stats.streak": "Week streak", "stats.top": "Most frequent: <b>%s</b> (%d)", "stats.since": "Since %s",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -754,8 +767,13 @@ function render() {
 // loadBookings reads the bookings persisted in the DB (consistent with Virgin,
 // without past days). A background scan on the server keeps them up to date; if
 // the first read comes back empty (scan still running after startup), it retries.
+let userStats = null; // GET /api/stats
+
 async function loadBookings(attempt = 0) {
-  if (attempt === 0) $("#out").innerHTML = `<div class="loading">${t("loading.bookings")}</div>`;
+  if (attempt === 0) {
+    $("#out").innerHTML = `<div class="loading">${t("loading.bookings")}</div>`;
+    fetch("/api/stats").then(r => r.json()).then(st => { userStats = st; if (state.view === "bookings") renderClasses(bookings, true); }).catch(() => {});
+  }
   bookings = (await (await fetch(`/api/bookings`)).json()) || [];
   if (state.view !== "bookings") return;
   if (!bookings.length && attempt < 3) {
@@ -846,15 +864,28 @@ function classRow(c) {
   return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${auto}${watchBtn}${right}</div></div></div>`;
 }
 
+// statsCard summarizes the class history on top of the bookings (once there's any).
+function statsCard() {
+  const st = userStats;
+  if (!st || !st.total) return "";
+  const tile = (v, k) => `<div class="stat"><div class="v">${v}</div><div class="k">${t(k)}</div></div>`;
+  const top = st.top && st.top[0];
+  return `<div class="stats"><div class="stats-grid">${tile(st.month, "stats.month")}${tile(st.total, "stats.total")}${
+    tile(st.byBot, "stats.bybot")}${tile(st.streak, "stats.streak")}</div>
+    <div class="stats-foot"><span>${top ? t("stats.top", esc(top.name), top.count) : ""}</span><span>${
+    t("stats.since", new Date(st.since + "T00:00").toLocaleDateString(loc(), { day: "numeric", month: "short" }))}</span></div></div>`;
+}
+
 function renderClasses(rows, isBookings) {
   if (!isBookings) updateFilterBar();
+  const head = isBookings ? statsCard() : "";
   if (!rows.length) {
-    $("#out").innerHTML = `<div class="empty">${isBookings ? t("empty.bookings") : t("empty.calendar")}</div>`;
+    $("#out").innerHTML = `${head}<div class="empty">${isBookings ? t("empty.bookings") : t("empty.calendar")}</div>`;
     return;
   }
   const byDay = {};
   for (const c of rows) (byDay[c.date] ??= []).push(c);
-  $("#out").innerHTML = Object.keys(byDay).sort().map(date => dayGroup(date, byDay[date].map(classRow).join(""), byDay[date].length)).join("");
+  $("#out").innerHTML = head + Object.keys(byDay).sort().map(date => dayGroup(date, byDay[date].map(classRow).join(""), byDay[date].length)).join("");
 }
 
 // loadAutomations reloads the rules (with their next attempt already recomputed,

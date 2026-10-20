@@ -185,6 +185,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/watches", s.requireSession(s.handleWatches))
 	mux.HandleFunc("/api/settings", s.requireSession(s.handleSettings))
 	mux.HandleFunc("/api/calfeed", s.requireSession(s.handleCalFeed))
+	mux.HandleFunc("/api/stats", s.requireSession(s.handleStats))
 	mux.HandleFunc("/cal/", s.handleICS) // authenticated by the secret in the path
 	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
 	mux.HandleFunc("/api/push", s.requireSession(s.handlePush))
@@ -473,6 +474,13 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 		}
 		rows.Close()
 	}
+	// Classes that already started go to the history before the rows are
+	// replaced: Virgin may stop reporting them.
+	if _, err := tx.Exec(archiveSQL+` AND b.user_id = ? AND b.date >= ? AND b.date <= ?`,
+		time.Now().In(s.loc).Format("2006-01-02 15:04"), userID, start, end); err != nil {
+		log.Printf("reconcile (archive) u%d: %v", userID, err)
+		return nil
+	}
 	if _, err := tx.Exec(`DELETE FROM bookings WHERE user_id = ? AND date >= ? AND date <= ?`, userID, start, end); err != nil {
 		log.Printf("reconcile (delete) u%d: %v", userID, err)
 		return nil
@@ -530,8 +538,20 @@ func (s *Server) deleteBooking(userID int64, name, club, date, start string) {
 		userID, name, club, date, start)
 }
 
+// archiveSQL copies the active bookings that started before ? into the history,
+// flagging the ones VirginBot made. Callers append more conditions.
+const archiveSQL = `INSERT OR IGNORE INTO history (user_id, name, club, date, start, end_time, instructor, by_bot)
+	SELECT b.user_id, b.name, b.club, b.date, b.start, b.end_time, b.instructor,
+	       EXISTS (SELECT 1 FROM bot_bookings x WHERE x.user_id = b.user_id AND x.name = b.name
+	               AND x.club = b.club AND x.date = b.date AND x.start = b.start)
+	FROM bookings b WHERE b.status = 'booked' AND b.date || ' ' || b.start < ?`
+
 func (s *Server) purgePastBookings() {
+	if _, err := s.db.Exec(archiveSQL, time.Now().In(s.loc).Format("2006-01-02 15:04")); err != nil {
+		log.Printf("archive bookings: %v", err)
+	}
 	s.db.Exec(`DELETE FROM bookings WHERE date < ?`, s.today())
+	s.db.Exec(`DELETE FROM bot_bookings WHERE date < ?`, s.today())
 	if err := s.store.PurgeSkips(s.today()); err != nil {
 		log.Printf("purge skips: %v", err)
 	}
@@ -802,6 +822,7 @@ func (s *Server) tryBookNow(userID int64, req bookRequest) (booked bool, waitlis
 	if res.Waitlisted {
 		return false, res.Position
 	}
+	s.MarkBotBooked(userID, req.Name, req.Club, req.Date, req.Start) // booked by turning the automation on
 	return true, 0
 }
 
