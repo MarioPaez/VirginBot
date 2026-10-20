@@ -28,8 +28,9 @@ import (
 var webFS embed.FS
 
 const (
-	defaultDays = 10
-	maxDays     = 30
+	defaultDays  = 10
+	maxDays      = 30
+	attemptsKept = 14 * 24 * time.Hour // engine attempt log shown in the admin view
 )
 
 // Server serves the calendar (live, via vapi), bookings and automations. All user
@@ -47,6 +48,8 @@ type Server struct {
 	loc      *time.Location
 	sess     *sessions
 	push     *push.Notifier // nil = Web Push disabled
+
+	engineCycle func() time.Time // engine's last completed cycle (admin health); nil = engine off
 
 	mu      sync.Mutex
 	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
@@ -187,6 +190,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/users", s.requireAdmin(s.handleAdminUsers))
 	mux.HandleFunc("/api/admin/automations", s.requireAdmin(s.handleAdminAutomations))
 	mux.HandleFunc("/api/admin/bookings", s.requireAdmin(s.handleAdminBookings))
+	mux.HandleFunc("/api/admin/attempts", s.requireAdmin(s.handleAdminAttempts))
 	// Not in Go's built-in MIME table; browsers want the proper type for the manifest.
 	mime.AddExtensionType(".webmanifest", "application/manifest+json")
 	static, _ := fs.Sub(webFS, "web")
@@ -529,6 +533,7 @@ func (s *Server) purgePastBookings() {
 	if err := s.store.PurgeOnce(s.today()); err != nil {
 		log.Printf("purge one-off rules: %v", err)
 	}
+	s.store.PurgeEngine(s.today(), attemptsKept)
 }
 
 // unskip clears a cancelled-occurrence mark once the user books or automates it again.

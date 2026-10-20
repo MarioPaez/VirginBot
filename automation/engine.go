@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MarioPaez/VirginBot/calendar"
@@ -31,6 +32,10 @@ const (
 	maxIdle         = 5 * time.Minute  // re-evaluate the schedule (no network) to pick up new rules
 	triggerGrace    = 15 * time.Minute // a fire only counts if we're within <=15min of its time (doesn't recover old fires)
 	horizonDays     = 9                // covers the longest window (8 days) with margin
+	// Fires due at the same instant run concurrently (a fire without a spot takes
+	// ~1 min of rounds: in series, the next user's opening fire would start late
+	// and lose the spot), but capped so vapi never sees a burst.
+	maxParallelFires = 4
 )
 
 // Engine runs the rules of ALL users with precise fires.
@@ -47,8 +52,16 @@ type Engine struct {
 	gap      time.Duration // wait between the following attempts
 	debug    bool          // VIRGINBOT_DEBUG: logs every evaluation (for local observation)
 
+	onBooked func(userID int64, r Rule, date string) // a booking went through (history: booked by the bot)
+	// onMissed runs after the last fire of an occurrence that's still full
+	// (status "waitlist" or "full"); it returns true if it took over (joined the
+	// waitlist, started a watch) and will tell the user itself.
+	onMissed func(userID int64, r Rule, date, status string) bool
+
+	lastCycle atomic.Int64 // unix time of the last completed scheduling cycle (health check)
+
 	mu    sync.Mutex
-	state map[string]*occState // key: userID|ruleID|date
+	state map[string]*occState // key: userID|ruleID|date; persisted in the store
 }
 
 type occState struct {
@@ -58,6 +71,7 @@ type occState struct {
 	lastError    string
 	missNotified bool
 	lastFired    time.Time // last fire already executed (avoids repeating it)
+	lastStatus   string    // class status seen in the last round (not persisted)
 }
 
 // ErrWaitlisted is what the book function returns when Virgin put the member on
@@ -93,6 +107,23 @@ func NewEngine(
 // SetPush sets how the booking outcomes reach the user (Web Push to their
 // devices). Not set = no notifications.
 func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.push = fn }
+
+// SetOnBooked sets what runs after each booking the engine makes.
+func (e *Engine) SetOnBooked(fn func(userID int64, r Rule, date string)) { e.onBooked = fn }
+
+// SetOnMissed sets what runs when an occurrence is still full at its last fire.
+func (e *Engine) SetOnMissed(fn func(userID int64, r Rule, date, status string) bool) {
+	e.onMissed = fn
+}
+
+// LastCycle is when the engine last completed a scheduling cycle (zero before
+// the first one).
+func (e *Engine) LastCycle() time.Time {
+	if u := e.lastCycle.Load(); u != 0 {
+		return time.Unix(u, 0)
+	}
+	return time.Time{}
+}
 
 // pushOutcome sends the short version of a booking outcome to the user's devices.
 func (e *Engine) pushOutcome(o occ, url, titleKey string, args ...any) {
@@ -146,15 +177,23 @@ func (o occ) triggers() []time.Time {
 // Run sleeps until the next fire and only then touches the network. Between fires
 // it wakes at most every maxIdle to pick up new rules (without calling Virgin).
 func (e *Engine) Run(stop <-chan struct{}) {
+	if e.store != nil {
+		loaded := e.store.loadStates(time.Now().In(e.loc).Format("2006-01-02"))
+		e.mu.Lock()
+		for k, st := range loaded {
+			e.state[k] = st
+		}
+		e.mu.Unlock()
+		log.Printf("automation: restored the state of %d occurrence(s)", len(loaded))
+	}
 	for {
 		now := time.Now().In(e.loc)
 		occs := e.occurrences(now)
 		if e.debug {
 			log.Printf("[debug] %d pending occurrence(s)", len(occs))
 		}
-		for _, o := range occs {
-			e.maybeFire(o, now)
-		}
+		e.fireDue(occs, now)
+		e.lastCycle.Store(time.Now().Unix())
 		sleep := e.untilNext(now, occs)
 		if e.debug {
 			log.Printf("[debug] next attempt in %s", sleep.Round(time.Second))
@@ -201,6 +240,23 @@ func (e *Engine) occurrences(now time.Time) []occ {
 	return out
 }
 
+// fireDue runs maybeFire for every occurrence, the due ones concurrently (at
+// most maxParallelFires at a time), and waits for all of them.
+func (e *Engine) fireDue(occs []occ, now time.Time) {
+	sem := make(chan struct{}, maxParallelFires)
+	var wg sync.WaitGroup
+	for _, o := range occs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			e.maybeFire(o, now)
+		}()
+	}
+	wg.Wait()
+}
+
 // maybeFire fires an attempt when due: there's a fire (class time) that's past
 // and not yet executed. After the last fire (24h before) without success, it
 // notifies the user.
@@ -243,11 +299,32 @@ func (e *Engine) maybeFire(o occ, now time.Time) {
 	e.attempt(o, st)
 	st.lastFired = dueT
 
-	// If this was the last fire (at 24h) and it didn't succeed, notify once.
+	// If this was the last fire (at 24h) and it didn't succeed, notify once —
+	// unless the user asked to fall back to the waitlist or a watch and that
+	// took over.
 	last := o.start.Add(-24 * time.Hour)
-	if !st.booked && !st.missNotified && !dueT.Before(last) {
+	if !st.booked && !st.waitlisted && !st.missNotified && !dueT.Before(last) {
 		st.missNotified = true
-		e.pushOutcome(o, "/?view=automations", "push.failed.title")
+		full := st.lastStatus == "waitlist" || st.lastStatus == "full"
+		if !(full && e.onMissed != nil && e.onMissed(o.rule.UserID, o.rule, o.date, st.lastStatus)) {
+			e.pushOutcome(o, "/?view=automations", "push.failed.title")
+		}
+	}
+	e.persist(o, st)
+}
+
+// persist saves the occurrence's state (survives restarts and deploys).
+func (e *Engine) persist(o occ, st *occState) {
+	if e.store != nil {
+		e.store.saveState(o.stateKey(), o.date, *st)
+	}
+}
+
+// record logs the outcome of a fire.
+func (e *Engine) record(o occ, outcome, detail string) {
+	if e.store != nil {
+		e.store.RecordAttempt(Attempt{UserID: o.rule.UserID, Name: o.rule.Name, Club: o.rule.Club,
+			Date: o.date, Start: o.rule.Start, Source: "engine", Outcome: outcome, Detail: detail})
 	}
 }
 
@@ -260,13 +337,18 @@ func (e *Engine) attempt(o occ, st *occState) {
 		log.Printf("automation: %s — waiting %s after the hour (the window sometimes opens a few seconds late)", tag, e.lead)
 		time.Sleep(e.lead)
 	}
+	failed := false // a calendar or booking call errored (vs. simply not bookable)
 	for round := 0; round < e.rounds && !st.booked; round++ {
 		classes, err := e.fetchDay(o.rule.UserID, o.rule.Club, o.date)
 		if err != nil {
 			st.lastError = err.Error()
+			failed = true
 			log.Printf("automation: %s — round %d/%d: ERROR fetching the calendar: %v", tag, round+1, e.rounds, err)
 		} else {
 			matches := findMatches(classes, o.rule, o.date)
+			if len(matches) > 0 {
+				st.lastStatus = bestStatus(matches)
+			}
 			switch {
 			case len(matches) == 0:
 				st.lastError = "not in the calendar yet"
@@ -277,6 +359,7 @@ func (e *Engine) attempt(o occ, st *occState) {
 					// We had tried to book: the booking DID go through (even though the
 					// API returned an error). We confirm it as a success.
 					log.Printf("automation: ✓ %s — BOOKED (confirmed after %d attempt(s), despite the API error)", tag, st.attempts)
+					e.record(o, OutcomeBooked, "confirmed after an API error")
 					e.notifyBooked(o, st)
 				} else {
 					log.Printf("automation: %s — already booked, nothing to do", tag)
@@ -301,16 +384,19 @@ func (e *Engine) attempt(o occ, st *occState) {
 					if errors.As(err, &wl) {
 						st.waitlisted = true
 						log.Printf("automation: %s — the spot went: WAITLISTED at position %d, stopping", tag, wl.Position)
+						e.record(o, OutcomeWaitlisted, fmt.Sprintf("position %d", wl.Position))
 						e.pushOutcome(o, "/?view=bookings", "push.waitlisted.title", wl.Position)
 						return
 					}
 					if err != nil {
 						st.lastError = err.Error()
+						failed = true
 						log.Printf("automation: %s — round %d/%d bed %d/%d: booking FAILED: %v", tag, round+1, e.rounds, bi+1, len(beds), err)
 						continue
 					}
 					st.booked = true
 					log.Printf("automation: ✓ %s — BOOKED (bed %d/%d, attempt %d)", tag, bi+1, len(beds), st.attempts)
+					e.record(o, OutcomeBooked, fmt.Sprintf("round %d", round+1))
 					e.notifyBooked(o, st)
 					return
 				}
@@ -336,13 +422,31 @@ func (e *Engine) attempt(o occ, st *occState) {
 			if bookedMatch(findMatches(classes, o.rule, o.date)) != nil {
 				st.booked = true
 				log.Printf("automation: ✓ %s — BOOKED (confirmed in final reconciliation, despite the API error)", tag)
+				e.record(o, OutcomeBooked, "confirmed in the final reconciliation")
 				e.notifyBooked(o, st)
 			}
 		}
 	}
 	if !st.booked {
 		log.Printf("automation: %s — fire finished WITHOUT booking after %d rounds (last reason: %s)", tag, e.rounds, st.lastError)
+		outcome := OutcomeUnavailable
+		if failed {
+			outcome = OutcomeError
+		}
+		e.record(o, outcome, st.lastError)
 	}
+}
+
+// bestStatus is the most bookable status among a class's instances (beds).
+func bestStatus(matches []*calendar.Class) string {
+	rank := map[string]int{"booked": 5, "bookable": 4, "waitlist": 3, "full": 2}
+	best := matches[0].Status
+	for _, c := range matches[1:] {
+		if rank[c.Status] > rank[best] {
+			best = c.Status
+		}
+	}
+	return best
 }
 
 // untilNext returns how long to sleep: until the next fire, or maxIdle if it's
@@ -420,6 +524,9 @@ func (e *Engine) langOf(userID int64) i18n.Lang {
 // notifyBooked tells the member about a successful booking (direct, confirmed
 // after an API error, or found in the final reconciliation).
 func (e *Engine) notifyBooked(o occ, st *occState) {
+	if e.onBooked != nil {
+		e.onBooked(o.rule.UserID, o.rule, o.date)
+	}
 	e.pushOutcome(o, "/?view=bookings", "push.booked.title")
 }
 

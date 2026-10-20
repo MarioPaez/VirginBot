@@ -141,6 +141,7 @@
   .pill.ok { background:var(--ok-soft); color:#86efac; }
   .pill.wait { background:var(--warn-soft); color:#fcd34d; }
   .pill.off { background:var(--surface-2); color:var(--muted); }
+  .pill.err { background:rgba(248,113,113,.12); color:#fca5a5; }
 
   /* ---- Automations ---- */
   .autos-filters { display:grid; gap:10px; margin-top:12px; }
@@ -412,6 +413,7 @@ const I18N = {
     "login.email": "Email", "login.pass": "Password", "login.submit": "Entra", "login.loading": "Accesso…",
     "row.spots": "%d posti liberi", "row.spot1": "1 posto libero", "status.opens": "Apre %s",
     "autosheet.title": "Automatizza questa lezione", "autosheet.weekly": "Ogni settimana", "autosheet.weekly.sub": "Ogni %s alle %s", "autosheet.once": "Solo questa volta", "auto.onlyon": "Solo il <b>%s</b>",
+    "admin.engine": "Motore", "admin.lastcycle": "Ultimo ciclo: %s", "admin.engineoff": "Il motore non è attivo su questo server.", "admin.attempts": "Ultimi tentativi", "admin.outcome": "Esito", "admin.source": "Origine", "admin.detail": "Dettaglio", "admin.empty.attempts": "Nessun tentativo registrato.", "admin.lastday": "Ultime 24 h: %d prenotate · %d errori · %d senza posto", "outcome.booked": "Prenotata", "outcome.waitlisted": "In lista", "outcome.unavailable": "Senza posto", "outcome.error": "Errore", "outcome.missed": "Scaduta", "source.engine": "Auto", "source.watch": "Osserva",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -447,6 +449,7 @@ const I18N = {
     "login.email": "Email", "login.pass": "Contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
     "row.spots": "Quedan %d plazas", "row.spot1": "Queda 1 plaza", "status.opens": "Abre %s",
     "autosheet.title": "Automatizar esta clase", "autosheet.weekly": "Cada semana", "autosheet.weekly.sub": "Cada %s a las %s", "autosheet.once": "Solo esta vez", "auto.onlyon": "Solo el <b>%s</b>",
+    "admin.engine": "Motor", "admin.lastcycle": "Último ciclo: %s", "admin.engineoff": "El motor no está activo en este servidor.", "admin.attempts": "Últimos intentos", "admin.outcome": "Resultado", "admin.source": "Origen", "admin.detail": "Detalle", "admin.empty.attempts": "No hay intentos registrados.", "admin.lastday": "Últimas 24 h: %d reservadas · %d errores · %d sin plaza", "outcome.booked": "Reservada", "outcome.waitlisted": "En lista", "outcome.unavailable": "Sin plaza", "outcome.error": "Error", "outcome.missed": "Expirada", "source.engine": "Auto", "source.watch": "Vigilar",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -482,6 +485,7 @@ const I18N = {
     "login.email": "Email", "login.pass": "Password", "login.submit": "Sign in", "login.loading": "Signing in…",
     "row.spots": "%d spots left", "row.spot1": "1 spot left", "status.opens": "Opens %s",
     "autosheet.title": "Automate this class", "autosheet.weekly": "Every week", "autosheet.weekly.sub": "Every %s at %s", "autosheet.once": "Just this once", "auto.onlyon": "Only on <b>%s</b>",
+    "admin.engine": "Engine", "admin.lastcycle": "Last cycle: %s", "admin.engineoff": "The engine isn't running on this server.", "admin.attempts": "Latest attempts", "admin.outcome": "Outcome", "admin.source": "Source", "admin.detail": "Detail", "admin.empty.attempts": "No attempts recorded.", "admin.lastday": "Last 24 h: %d booked · %d errors · %d no spot", "outcome.booked": "Booked", "outcome.waitlisted": "Waitlisted", "outcome.unavailable": "No spot", "outcome.error": "Error", "outcome.missed": "Expired", "source.engine": "Auto", "source.watch": "Watch",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -841,11 +845,12 @@ async function loadAutomations() {
 }
 
 // ---- admin (visible only to VA_ADMIN_EMAIL) ----
-let adminAutos = [], adminBookings = [];
+let adminAutos = [], adminBookings = [], adminHealth = null;
 
 async function loadAdmin() {
   try { adminAutos = (await (await fetch("/api/admin/automations")).json()) || []; } catch (e) { adminAutos = []; }
   try { adminBookings = (await (await fetch("/api/admin/bookings")).json()) || []; } catch (e) { adminBookings = []; }
+  try { adminHealth = await (await fetch("/api/admin/attempts?limit=100")).json(); } catch (e) { adminHealth = null; }
   if (state.view === "admin") renderAdmin();
 }
 
@@ -889,7 +894,27 @@ function renderAdmin() {
       </tr>`).join("")
     : `<tr><td colspan="4" class="empty">${t("admin.empty.bookings")}</td></tr>`;
 
+  const h = adminHealth || { attempts: [] };
+  const OUTCOME_PILL = { booked: "ok", waitlisted: "wait", error: "err" };
+  const attemptRows = h.attempts.length
+    ? h.attempts.map(a => `<tr>
+        <td>${relWhen(a.time)}</td>
+        <td class="owner">${esc(a.ownerEmail)}</td>
+        <td>${esc(a.name)} · ${esc(shortClub(a.club))}<br><span class="owner">${fmtDayTitle(a.date)} ${a.start}</span></td>
+        <td>${t("source." + a.source)}</td>
+        <td><span class="pill ${OUTCOME_PILL[a.outcome] || "off"}">${t("outcome." + a.outcome)}</span></td>
+        <td class="owner">${esc(a.detail)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="6" class="empty">${t("admin.empty.attempts")}</td></tr>`;
+  const day = h.lastDay || {};
+  const engine = !h.engine ? t("admin.engineoff")
+    : `${h.lastCycle ? t("admin.lastcycle", relWhen(h.lastCycle)) : ""}<br>${t("admin.lastday", day.booked || 0, day.error || 0, day.unavailable || 0)}`;
+
   $("#out").innerHTML = `
+    <div class="admin-section">
+      <h3>${t("admin.engine")}</h3>
+      <p class="hint" style="margin:0 4px">${engine}</p>
+    </div>
     <div class="admin-section">
       <h3>${t("admin.automations")}</h3>
       <table class="atable"><thead><tr>
@@ -901,6 +926,12 @@ function renderAdmin() {
       <table class="atable"><thead><tr>
         <th>${t("admin.owner")}</th><th>${t("admin.class")}</th><th>${t("admin.club")}</th><th>${t("admin.when")}</th>
       </tr></thead><tbody>${bookingRows}</tbody></table>
+    </div>
+    <div class="admin-section">
+      <h3>${t("admin.attempts")}</h3>
+      <table class="atable"><thead><tr>
+        <th>${t("admin.when")}</th><th>${t("admin.owner")}</th><th>${t("admin.class")}</th><th>${t("admin.source")}</th><th>${t("admin.outcome")}</th><th>${t("admin.detail")}</th>
+      </tr></thead><tbody>${attemptRows}</tbody></table>
     </div>`;
 }
 

@@ -105,17 +105,20 @@ func main() {
 	notifier := pushFromEnv(database) // nil = no notifications at all
 	srv.SetPush(notifier)
 
-	// Outdated x-api-key / app version breaks everyone: push it to the admin's
-	// devices (looked up at alert time: the admin may sign in after startup).
+	// Admin alerts go to the admin's devices (looked up at alert time: the admin
+	// may sign in after startup). nil = no admin alerts.
+	var adminAlert func(title, body string)
 	if admin := strings.TrimSpace(os.Getenv("VA_ADMIN_EMAIL")); admin != "" && notifier != nil {
-		auth.OnClientRejected(func(title, body string) {
+		adminAlert = func(title, body string) {
 			for _, uid := range acc.ListUserIDs() {
-				if strings.EqualFold(acc.Email(uid), admin) && notifier.Notify(uid, push.Message{Title: title, Body: body, URL: "/"}) > 0 {
+				if strings.EqualFold(acc.Email(uid), admin) && notifier.Notify(uid, push.Message{Title: title, Body: body, URL: "/?view=admin"}) > 0 {
 					return
 				}
 			}
 			log.Printf("admin alert not delivered: %s has no device with notifications on", admin)
-		})
+		}
+		// Outdated x-api-key / app version breaks everyone.
+		auth.OnClientRejected(adminAlert)
 	} else {
 		log.Println("warning: no admin alerts (needs VA_ADMIN_EMAIL and push notifications)")
 	}
@@ -149,6 +152,10 @@ func main() {
 		log.Println("automation engine DISABLED (VIRGINBOT_NO_ENGINE=1)")
 	} else {
 		go engine.Run(make(chan struct{}))
+		srv.SetEngineHealth(engine.LastCycle)
+		if adminAlert != nil {
+			go automation.Watchdog(engine, adminAlert)
+		}
 	}
 
 	log.Printf("API listening on http://localhost%s", addr)
