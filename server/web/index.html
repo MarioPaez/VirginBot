@@ -196,6 +196,10 @@
     <span class="grouplabel" data-i18n="filter.class">Class</span>
     <div class="chips" id="classChips" data-multi="1" data-key="cats"></div>
   </div>
+  <div class="chipgroup" id="pilatesGroup" style="display:none">
+    <span class="grouplabel" data-i18n="filter.pilates">Pilates type</span>
+    <div class="chips" id="pilatesChips" data-multi="1" data-key="pilates"></div>
+  </div>
   <div class="chipgroup">
     <span class="grouplabel" data-i18n="filter.day">Day</span>
     <div class="chips" id="dayChips" data-multi="1" data-key="days"></div>
@@ -225,7 +229,7 @@
 const DAYS = 10;
 const $ = s => document.querySelector(s);
 let all = [], autos = [], bookings = [], shared = [], myEmail = "", loadToken = 0;
-const state = { cats: new Set(), days: new Set(), club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
+const state = { cats: new Set(), pilates: new Set(), days: new Set(), club: "", view: "calendar", autoStatus: "all", autoCats: new Set() };
 
 // ---- i18n ----
 const LANGS = ["it", "es", "en"];
@@ -239,7 +243,7 @@ const I18N = {
     "admin.automations": "Automazioni di tutti", "admin.bookings": "Prenotazioni di tutti (sola lettura)",
     "admin.owner": "Utente", "admin.class": "Lezione", "admin.club": "Club", "admin.when": "Quando", "admin.status": "Stato", "admin.actions": "Azioni",
     "admin.empty.automations": "Nessuna automazione registrata.", "admin.empty.bookings": "Nessuna prenotazione nei prossimi giorni.",
-    "filter.class": "Lezione", "filter.day": "Giorno", "filter.club": "Club", "filter.status": "Stato",
+    "filter.class": "Lezione", "filter.pilates": "Tipo di Pilates", "filter.day": "Giorno", "filter.club": "Club", "filter.status": "Stato",
     "all.m": "Tutti", "all.f": "Tutte", "status.active": "Attive", "status.paused": "In pausa",
     "loading.calendar": "Preparazione del calendario…", "loading.calendar2": "Caricamento calendario…",
     "loading.bookings": "Caricamento prenotazioni…", "error.calendar": "Impossibile caricare il calendario. Riprova.",
@@ -269,7 +273,7 @@ const I18N = {
     "admin.automations": "Automatizaciones de todos", "admin.bookings": "Reservas de todos (solo lectura)",
     "admin.owner": "Usuario", "admin.class": "Clase", "admin.club": "Club", "admin.when": "Cuándo", "admin.status": "Estado", "admin.actions": "Acciones",
     "admin.empty.automations": "No hay automatizaciones registradas.", "admin.empty.bookings": "No hay reservas en los próximos días.",
-    "filter.class": "Clase", "filter.day": "Día", "filter.club": "Club", "filter.status": "Estado",
+    "filter.class": "Clase", "filter.pilates": "Tipo de Pilates", "filter.day": "Día", "filter.club": "Club", "filter.status": "Estado",
     "all.m": "Todos", "all.f": "Todas", "status.active": "Activas", "status.paused": "Pausadas",
     "loading.calendar": "Preparando el calendario…", "loading.calendar2": "Cargando calendario…",
     "loading.bookings": "Cargando tus reservas…", "error.calendar": "No se pudo cargar el calendario. Reintenta.",
@@ -299,7 +303,7 @@ const I18N = {
     "admin.automations": "Everyone's automations", "admin.bookings": "Everyone's bookings (read-only)",
     "admin.owner": "User", "admin.class": "Class", "admin.club": "Club", "admin.when": "When", "admin.status": "Status", "admin.actions": "Actions",
     "admin.empty.automations": "No automations registered.", "admin.empty.bookings": "No bookings in the coming days.",
-    "filter.class": "Class", "filter.day": "Day", "filter.club": "Club", "filter.status": "Status",
+    "filter.class": "Class", "filter.pilates": "Pilates type", "filter.day": "Day", "filter.club": "Club", "filter.status": "Status",
     "all.m": "All", "all.f": "All", "status.active": "Active", "status.paused": "Paused",
     "loading.calendar": "Preparing the calendar…", "loading.calendar2": "Loading the calendar…",
     "loading.bookings": "Loading your bookings…", "error.calendar": "Couldn't load the calendar. Try again.",
@@ -364,7 +368,7 @@ async function setLang(v) {
   fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for emails)
   applyI18n();
   if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
-  populateClubChips(all); populateClassChips(all); populateDayChips(all); // localized labels
+  populateClubChips(all); populateClassChips(all); populatePilatesChips(all); populateDayChips(all); // localized labels
   render();
 }
 
@@ -375,10 +379,11 @@ function weekdayName(wd) {
 const weekdayShort = wd => capitalize(new Date(2024, 0, 7 + wd).toLocaleDateString(loc(), { weekday: "short" }));
 
 // Broad category of a class, for the filters (several classes → one category).
-const CATEGORIES = ["Calisthenics", "Pilates", "Solarium", "Full Body", "TRX", "Cycle"];
+const CATEGORIES = ["Calisthenics", "Lift", "Pilates", "Solarium", "Full Body", "TRX", "Cycle"];
 function classCategory(name) {
   const n = name.toLowerCase();
   if (n.includes("calisthenics")) return "Calisthenics";
+  if (n.includes("lift club")) return "Lift";
   if (n.includes("reformer") || n.includes("pilates")) return "Pilates";
   if (n.includes("solarium")) return "Solarium";
   if (n.includes("full body")) return "Full Body";
@@ -386,6 +391,15 @@ function classCategory(name) {
   if (n.includes("cycle")) return "Cycle";
   return name;
 }
+
+// Pilates variant for the sub-filter: sponsor suffixes dropped ("… Powered By
+// Fineco" is the same class) and "Reformer Pilates X" shortened to "Reformer X".
+function pilatesType(name) {
+  return name.replace(/\s+powered by\b.*$/i, "").replace(/^reformer pilates\s+/i, "Reformer ").trim();
+}
+// Reformer variants first, then mat/hot, each alphabetically.
+const pilatesOrder = (a, b) =>
+  (b.startsWith("Reformer") - a.startsWith("Reformer")) || a.localeCompare(b);
 
 const weekdayOf = date => new Date(date + "T00:00:00").getDay();
 const ruleFor = c => autos.find(r =>
@@ -421,6 +435,7 @@ async function loadCalendar(token) {
   $("#meta").textContent = t("meta.count", all.length, (days || []).length);
   populateClubChips(all);
   populateClassChips(all);
+  populatePilatesChips(all);
   populateDayChips(all);
   if (state.view === "calendar") render();
 }
@@ -441,6 +456,19 @@ function populateClassChips(list) {
     cats.map(c => `<button class="chip${state.cats.has(c)?" active":""}" data-val="${c}">${c}</button>`).join("");
 }
 
+// Pilates type chips: only while the Pilates category is selected (otherwise
+// they'd be noise); empty selection = every Pilates class.
+function populatePilatesChips(list) {
+  const on = state.cats.has("Pilates");
+  $("#pilatesGroup").style.display = on ? "flex" : "none";
+  if (!on) { state.pilates.clear(); return; }
+  const types = [...new Set(list.filter(c => classCategory(c.name) === "Pilates").map(c => pilatesType(c.name)))]
+    .sort(pilatesOrder);
+  $("#pilatesChips").innerHTML =
+    `<button class="chip${state.pilates.size===0?" active":""}" data-val="">${t("all.m")}</button>` +
+    types.map(p => `<button class="chip${state.pilates.has(p)?" active":""}" data-val="${p}">${p}</button>`).join("");
+}
+
 // Weekday chips (cumulative multi-select): only the days present, Monday first.
 function populateDayChips(list) {
   const present = new Set(list.map(c => weekdayOf(c.date)));
@@ -458,6 +486,7 @@ function render() {
   if (state.view === "admin") return renderAdmin();
   const rows = all.filter(c =>
     (!state.cats.size || state.cats.has(classCategory(c.name))) &&
+    (!state.pilates.size || classCategory(c.name) !== "Pilates" || state.pilates.has(pilatesType(c.name))) &&
     (!state.days.size || state.days.has(String(weekdayOf(c.date)))) &&
     (!state.club || c.club === state.club));
   renderClasses(rows, false);
@@ -643,6 +672,7 @@ const fmtItDate = ymd => capitalize(new Date(ymd + "T00:00").toLocaleDateString(
 // Color + icon per category, for each card's visual accent.
 const CAT_STYLE = {
   Calisthenics: { color: "#e2231a", icon: "🏋️" },
+  Lift:         { color: "#e0c341", icon: "🦾" },
   Pilates:      { color: "#b07cff", icon: "🧘" },
   Solarium:     { color: "#f5a623", icon: "☀️" },
   "Full Body":  { color: "#1faa59", icon: "💪" },
@@ -799,7 +829,8 @@ document.querySelectorAll(".chips").forEach(group => {
       if (val === "") set.clear();
       else if (set.has(val)) set.delete(val);
       else set.add(val);
-      (group.id === "dayChips" ? populateDayChips : populateClassChips)(all);
+      if (group.id === "dayChips") populateDayChips(all);
+      else { populateClassChips(all); populatePilatesChips(all); } // Pilates types depend on the class selection
     } else {
       // Single-select (Club).
       group.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));

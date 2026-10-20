@@ -68,12 +68,13 @@ func main() {
 	}
 
 	clubs := []int{calendar.ClubCorsoComo, calendar.ClubCavour, calendar.ClubPalermo}
-	// Classes we show: calisthenics, pilates (reformer), full body, TRX and cycle
-	// in every club; solarium only in Corso Como.
+	// Classes we show: calisthenics, lift, pilates (reformer), full body, TRX and
+	// cycle in every club; solarium only in Corso Como.
 	keep := func(c calendar.Class) bool {
 		name := strings.ToLower(c.Name)
 		switch {
 		case strings.Contains(name, "calisthenics"),
+			strings.Contains(name, "lift club"),
 			strings.Contains(name, "reformer"),
 			strings.Contains(name, "pilates"),
 			strings.Contains(name, "full body"),
