@@ -59,6 +59,11 @@ type Engine struct {
 	// waitlist, started a watch) and will tell the user itself.
 	onMissed func(userID int64, r Rule, date, status string) bool
 
+	// busy reports another booking of the user at the same time as the rule's
+	// class (and which), so the engine never books two overlapping classes:
+	// one of them would end up as a no-show. nil = no check.
+	busy func(userID int64, r Rule, date string) (string, bool)
+
 	lastCycle atomic.Int64 // unix time of the last completed scheduling cycle (health check)
 
 	mu    sync.Mutex
@@ -112,6 +117,9 @@ func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.pus
 // SetMemberWindow sets where the engine reads each member's booking window, so
 // it doesn't fire before the window opens for members without priority booking.
 func (e *Engine) SetMemberWindow(fn func(userID int64) int) { e.memberWindow = fn }
+
+// SetBusy sets how the engine finds a clashing booking of the user.
+func (e *Engine) SetBusy(fn func(userID int64, r Rule, date string) (string, bool)) { e.busy = fn }
 
 // SetOnBooked sets what runs after each booking the engine makes.
 func (e *Engine) SetOnBooked(fn func(userID int64, r Rule, date string)) { e.onBooked = fn }
@@ -357,6 +365,14 @@ func (e *Engine) record(o occ, outcome, detail string) {
 // bookable right as the window opens.
 func (e *Engine) attempt(o occ, st *occState) {
 	tag := fmt.Sprintf("u%d %s %s @ %s", o.rule.UserID, o.rule.Name, o.date, o.rule.Start)
+	if e.busy != nil {
+		if other, clash := e.busy(o.rule.UserID, o.rule, o.date); clash {
+			st.lastError = "overlaps " + other
+			log.Printf("automation: %s — not booking: it overlaps %s", tag, other)
+			e.record(o, OutcomeOverlap, other)
+			return
+		}
+	}
 	if e.lead > 0 {
 		log.Printf("automation: %s — waiting %s after the hour (the window sometimes opens a few seconds late)", tag, e.lead)
 		time.Sleep(e.lead)

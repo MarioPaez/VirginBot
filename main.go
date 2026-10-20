@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 	_ "time/tzdata" // embeds the timezone database (Europe/Rome) into the binary
 
 	"github.com/MarioPaez/VirginBot/account"
 	"github.com/MarioPaez/VirginBot/automation"
 	"github.com/MarioPaez/VirginBot/calendar"
 	"github.com/MarioPaez/VirginBot/db"
+	"github.com/MarioPaez/VirginBot/i18n"
 	"github.com/MarioPaez/VirginBot/push"
 	"github.com/MarioPaez/VirginBot/server"
 	"github.com/MarioPaez/VirginBot/vapi"
@@ -117,6 +119,18 @@ func main() {
 			}
 			log.Printf("admin alert not delivered: %s has no device with notifications on", admin)
 		}
+		// A user whose stored Virgin password stopped working is told to sign in
+		// again (their automations are stopped meanwhile), at most every 3 days.
+		if notifier != nil {
+			auth.OnCredsRejected(func(userID int64) {
+				if acc.CredsAlerted(userID, 72*time.Hour) {
+					return
+				}
+				lang := i18n.Coerce(acc.Lang(userID))
+				notifier.Notify(userID, push.Message{Title: i18n.T(lang, "push.creds.title"), Body: i18n.T(lang, "push.creds.body"), URL: "/"})
+			})
+		}
+
 		// Outdated x-api-key / app version breaks everyone.
 		auth.OnClientRejected(adminAlert)
 	} else {
@@ -157,6 +171,7 @@ func main() {
 		engine.SetOnMissed(srv.OnEngineMissed)
 		engine.SetMemberWindow(acc.WindowMin)
 		srv.SetEngineForget(engine.Forget)
+		engine.SetBusy(srv.EngineBusy)
 		go engine.Run(make(chan struct{}))
 		go srv.RunWatches()   // books for real too: only where the engine runs
 		go srv.RunReminders() // pushes to real devices: same

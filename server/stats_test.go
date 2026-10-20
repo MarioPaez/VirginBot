@@ -23,7 +23,7 @@ func TestHistoryAndStats(t *testing.T) {
 
 	s.purgePastBookings()
 	st := s.userStats(1, now)
-	if st.Total != 1 || st.ByBot != 1 || len(st.Top) != 1 || st.Top[0].Name != "Calisthenics" || st.Since != yesterday {
+	if st.Total != 1 || st.ByBot != 1 || len(st.Classes) != 1 || st.Classes[0].Name != "Calisthenics" || st.Since != yesterday {
 		t.Fatalf("after the purge: %+v", st)
 	}
 	s.purgePastBookings() // idempotent
@@ -45,5 +45,28 @@ func TestStreak(t *testing.T) {
 	// the gap of the week of 29/9 ends it.
 	if st := s.userStats(1, now); st.Streak != 2 || st.Total != 4 || st.Month != 3 {
 		t.Fatalf("stats = %+v", st)
+	}
+}
+
+// "Did you go?": unanswered recent classes are asked about, a "no" leaves the
+// counts and feeds the no-show warning, and a weekly slot visited 3 times is
+// suggested for automation.
+func TestAttendance(t *testing.T) {
+	s := testServer(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, s.loc)                                   // Wednesday
+	for _, d := range []string{"2026-10-19", "2026-10-12", "2026-10-05", "2026-09-28"} { // Mondays
+		s.db.Exec(`INSERT INTO history (user_id, name, club, date, start, end_time) VALUES (1, 'Calisthenics', 'Milano Cavour', ?, '18:30', '19:30')`, d)
+	}
+	st := s.userStats(1, now)
+	if st.Total != 4 || len(st.Pending) != 2 || len(st.Suggest) != 1 || st.Suggest[0].Weekday != 1 || st.Suggest[0].End != "19:30" {
+		t.Fatalf("before answering: %+v", st)
+	}
+	if st.Slot == nil || st.Slot.Count != 4 || len(st.Months) != monthsShown || st.Months[monthsShown-1].Count != 3 {
+		t.Fatalf("slot/months: %+v %+v", st.Slot, st.Months)
+	}
+	s.db.Exec(`UPDATE history SET attended = 0 WHERE date IN ('2026-10-19', '2026-10-12')`)
+	st = s.userStats(1, now)
+	if st.Total != 2 || st.Missed30 != 2 || len(st.Pending) != 0 || len(st.Suggest) != 0 {
+		t.Fatalf("after two no-shows: %+v", st)
 	}
 }

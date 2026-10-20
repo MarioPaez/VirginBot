@@ -27,6 +27,8 @@ type Store struct {
 // NewStore opens the store on the DB. `secret` derives the encryption key; it
 // must be stable across restarts (APP_SECRET environment variable).
 func NewStore(db *sql.DB, secret string) (*Store, error) {
+	// The 2 h reminder was dropped: at 2 h the class can no longer be cancelled.
+	db.Exec(`UPDATE users SET reminder_hours = 4 WHERE reminder_hours = 2`)
 	key := sha256.Sum256([]byte(secret))
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
@@ -118,13 +120,30 @@ func (s *Store) SetMember(userID int64, homeClub, windowMin int) error {
 	return err
 }
 
+// DefaultReminderHours is the reminder lead time of users who never chose one.
+const DefaultReminderHours = 4
+
 // ReminderHours returns how many hours before each booking the user wants a
-// reminder (0 = off).
+// reminder (0 = off). Stored: 0 = never chosen (the default), -1 = off.
 func (s *Store) ReminderHours(userID int64) int {
 	var h int
 	s.db.QueryRow(`SELECT reminder_hours FROM users WHERE id = ?`, userID).Scan(&h)
+	return reminderFromDB(h)
+}
+
+func reminderFromDB(h int) int {
+	switch {
+	case h == 0:
+		return DefaultReminderHours
+	case h < 0:
+		return 0
+	}
 	return h
 }
+
+// ReminderSQL is the SQL expression for a user's effective reminder hours, for
+// queries joining users (alias u).
+const ReminderSQL = `(CASE WHEN u.reminder_hours = 0 THEN 4 WHEN u.reminder_hours < 0 THEN 0 ELSE u.reminder_hours END)`
 
 // FullAction returns what to do when an automated class is still full at its
 // last attempt ("" = just notify, "waitlist", "watch").
@@ -134,10 +153,45 @@ func (s *Store) FullAction(userID int64) string {
 	return a
 }
 
-// SetPrefs stores the user's reminder lead time and full-class fallback.
-func (s *Store) SetPrefs(userID int64, reminderHours int, fullAction string) error {
-	_, err := s.db.Exec(`UPDATE users SET reminder_hours = ?, full_action = ? WHERE id = ?`, reminderHours, fullAction, userID)
+// FriendNotify reports whether the user wants a push when a friend books one of
+// their usual classes (on by default).
+func (s *Store) FriendNotify(userID int64) bool {
+	on := 1
+	s.db.QueryRow(`SELECT friend_notify FROM users WHERE id = ?`, userID).Scan(&on)
+	return on != 0
+}
+
+// SetPrefs stores the user's notification preferences (reminderHours 0 = off).
+func (s *Store) SetPrefs(userID int64, reminderHours int, fullAction string, friendNotify bool) error {
+	stored := reminderHours
+	if stored == 0 {
+		stored = -1 // explicitly off, unlike 0 = never chosen
+	}
+	f := 0
+	if friendNotify {
+		f = 1
+	}
+	_, err := s.db.Exec(`UPDATE users SET reminder_hours = ?, full_action = ?, friend_notify = ? WHERE id = ?`,
+		stored, fullAction, f, userID)
 	return err
+}
+
+// CredsAlerted reports whether the user was told their stored Virgin password
+// stopped working less than `within` ago; if not, it records that they're
+// being told now.
+func (s *Store) CredsAlerted(userID int64, within time.Duration) bool {
+	var last string
+	s.db.QueryRow(`SELECT creds_alert FROM users WHERE id = ?`, userID).Scan(&last)
+	if t, err := time.Parse(time.RFC3339, last); err == nil && time.Since(t) < within {
+		return true
+	}
+	s.db.Exec(`UPDATE users SET creds_alert = ? WHERE id = ?`, time.Now().Format(time.RFC3339), userID)
+	return false
+}
+
+// ClearCredsAlert forgets the alert (the user signed in again).
+func (s *Store) ClearCredsAlert(userID int64) {
+	s.db.Exec(`UPDATE users SET creds_alert = '' WHERE id = ?`, userID)
 }
 
 // CalToken returns the secret of the user's private calendar feed, creating it

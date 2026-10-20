@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS users (
     cal_token      TEXT NOT NULL DEFAULT '',    -- secret of the private .ics feed ('' = not created)
     reminder_hours INTEGER NOT NULL DEFAULT 0,  -- push a reminder N hours before each booking (0 = off)
     full_action    TEXT NOT NULL DEFAULT '',    -- automated class still full at its last attempt: '' | 'waitlist' | 'watch'
-    window_min     INTEGER NOT NULL DEFAULT 0   -- how long before a class the member can book it, minutes (0 = unknown)
+    window_min     INTEGER NOT NULL DEFAULT 0,  -- how long before a class the member can book it, minutes (0 = unknown)
+    friend_notify  INTEGER NOT NULL DEFAULT 1,  -- push when a friend books one of my usual classes
+    creds_alert    TEXT NOT NULL DEFAULT ''     -- last "your Virgin password stopped working" push (RFC 3339)
 );
 CREATE TABLE IF NOT EXISTS automations (
     user_id           INTEGER NOT NULL,
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS automations (
     enabled           INTEGER NOT NULL,
     created           TEXT NOT NULL,
     once_date         TEXT NOT NULL DEFAULT '', -- YYYY-MM-DD: book only that occurrence ('' = every week)
+    end_time          TEXT NOT NULL DEFAULT '', -- HH:MM, to refuse overlapping rules ('' = unknown: 1 h)
     PRIMARY KEY (user_id, id)
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -105,7 +108,17 @@ CREATE TABLE IF NOT EXISTS history (
     end_time   TEXT NOT NULL DEFAULT '',
     instructor TEXT NOT NULL DEFAULT '',
     by_bot     INTEGER NOT NULL DEFAULT 0,
+    attended   INTEGER, -- the user's answer to "did you go?": 1, 0 or NULL (not answered)
     PRIMARY KEY (user_id, name, club, date, start)
+);
+CREATE TABLE IF NOT EXISTS friend_notified (
+    user_id   INTEGER NOT NULL, -- who got the push
+    friend_id INTEGER NOT NULL, -- who booked
+    name      TEXT NOT NULL,
+    club      TEXT NOT NULL,
+    date      TEXT NOT NULL,
+    start     TEXT NOT NULL,
+    PRIMARY KEY (user_id, friend_id, name, club, date, start)
 );
 CREATE TABLE IF NOT EXISTS bot_bookings (
     user_id INTEGER NOT NULL,
@@ -215,12 +228,20 @@ func migrate(d *sql.DB) error {
 		{"reminder_hours", "INTEGER NOT NULL DEFAULT 0"},
 		{"full_action", "TEXT NOT NULL DEFAULT ''"},
 		{"window_min", "INTEGER NOT NULL DEFAULT 0"},
+		{"friend_notify", "INTEGER NOT NULL DEFAULT 1"},
+		{"creds_alert", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureColumn(d, "users", c[0], c[1]); err != nil {
 			return err
 		}
 	}
 	if err := ensureColumn(d, "automations", "once_date", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(d, "automations", "end_time", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(d, "history", "attended", "INTEGER"); err != nil {
 		return err
 	}
 

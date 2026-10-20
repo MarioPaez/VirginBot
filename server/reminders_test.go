@@ -11,7 +11,7 @@ import (
 func TestDueReminders(t *testing.T) {
 	s := testServer(t)
 	s.store = automation.NewStore(s.db)
-	if _, err := s.db.Exec(`INSERT INTO users (id, email, pass, created, reminder_hours) VALUES (1, 'a@x', x'00', '', 12), (2, 'b@x', x'00', '', 0)`); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO users (id, email, pass, created, reminder_hours) VALUES (1, 'a@x', x'00', '', 12), (2, 'b@x', x'00', '', -1)`); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().In(s.loc).Truncate(time.Minute)

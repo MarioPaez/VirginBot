@@ -190,6 +190,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/settings", s.requireSession(s.handleSettings))
 	mux.HandleFunc("/api/calfeed", s.requireSession(s.handleCalFeed))
 	mux.HandleFunc("/api/stats", s.requireSession(s.handleStats))
+	mux.HandleFunc("/api/history/attended", s.requireSession(s.handleAttended))
 	mux.HandleFunc("/api/instructors/favs", s.requireSession(s.handleFavInstructors))
 	mux.HandleFunc("/cal/", s.handleICS) // authenticated by the secret in the path
 	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
@@ -467,19 +468,29 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 		return nil
 	}
 	defer tx.Rollback()
-	// Occurrences the user was waitlisted for: if one is now an active booking,
-	// they got in. Read through the tx (the pool has a single connection).
-	wasWaitlisted := map[string]bool{}
-	if rows, err := tx.Query(`SELECT name, club, date, start FROM bookings
-		 WHERE user_id = ? AND date >= ? AND date <= ? AND status = 'waitlisted'`, userID, start, end); err == nil {
+	// What the user had: waitlist places (if one is now an active booking, they
+	// got in) and active bookings (any other active one is new: friends who
+	// usually go are told). Read through the tx (the pool has a single connection).
+	wasWaitlisted, wasBooked := map[string]bool{}, map[string]bool{}
+	if rows, err := tx.Query(`SELECT name, club, date, start, status FROM bookings
+		 WHERE user_id = ? AND date >= ? AND date <= ?`, userID, start, end); err == nil {
 		for rows.Next() {
-			var n, c, d, st string
-			if rows.Scan(&n, &c, &d, &st) == nil {
-				wasWaitlisted[n+"|"+c+"|"+d+"|"+st] = true
+			var n, c, d, st, status string
+			if rows.Scan(&n, &c, &d, &st, &status) == nil {
+				if status == "waitlisted" {
+					wasWaitlisted[n+"|"+c+"|"+d+"|"+st] = true
+				} else {
+					wasBooked[n+"|"+c+"|"+d+"|"+st] = true
+				}
 			}
 		}
 		rows.Close()
 	}
+	// A user's first sync (nothing stored yet) isn't news for their friends.
+	var known int
+	tx.QueryRow(`SELECT (SELECT COUNT(*) FROM bookings WHERE user_id = ?) + (SELECT COUNT(*) FROM history WHERE user_id = ?)`,
+		userID, userID).Scan(&known)
+	var fresh []calendar.Class
 	// Classes that already started go to the history before the rows are
 	// replaced: Virgin may stop reporting them.
 	if _, err := tx.Exec(archiveSQL+` AND b.user_id = ? AND b.date >= ? AND b.date <= ?`,
@@ -494,10 +505,13 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 	now := time.Now().Format(time.RFC3339)
 	for _, c := range booked {
 		status := "booked"
+		k := c.Name + "|" + c.Club + "|" + c.Date + "|" + c.Start
 		if c.Waitlisted {
 			status = "waitlisted"
-		} else if wasWaitlisted[c.Name+"|"+c.Club+"|"+c.Date+"|"+c.Start] {
+		} else if wasWaitlisted[k] {
 			promoted = append(promoted, c)
+		} else if !wasBooked[k] && known > 0 {
+			fresh = append(fresh, c)
 		}
 		// An active booking wins over a waitlist place for the same occurrence.
 		if _, err := tx.Exec(
@@ -520,6 +534,13 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 	}
 	for _, c := range promoted {
 		s.notifyPromoted(userID, c)
+	}
+	if len(fresh) > 0 {
+		go func() {
+			for _, c := range fresh {
+				s.notifyFriends(userID, c)
+			}
+		}()
 	}
 	return promoted
 }
@@ -708,6 +729,11 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if at, ok := s.startOf(req.Date, req.Start); ok && time.Now().After(cancelDeadline(at)) {
+		writeJSON(w, map[string]any{"ok": false, "error": "too late to cancel: Virgin only allows it until " +
+			cancelDeadline(at).Format("15:04"), "tooLate": true})
+		return
+	}
 	err := s.auth.Do(userID, func(client *vapi.Client) error {
 		return client.Cancel(req.SessionID, req.BookingID, req.ClubID, req.ClassID, req.Date)
 	})
@@ -776,6 +802,17 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 		if req.Once {
 			once = req.Date
 		}
+		// Two automations at the same time would book two classes the user can't
+		// both attend (one becomes a no-show): refused, saying which one clashes.
+		ruleID := ""
+		if prev, found := s.store.Find(userID, req.Name, req.Club, wd, req.Start); found {
+			ruleID = prev.ID
+		}
+		if other, clash := s.store.Overlapping(userID, ruleID, wd, req.Start, req.End, once); clash {
+			w.WriteHeader(http.StatusConflict)
+			writeJSON(w, map[string]any{"error": "overlaps another automation", "overlap": other})
+			return
+		}
 		// A class has one rule: a second one-off date would silently replace the
 		// first, so it's refused (switching to every week covers both).
 		if prev, found := s.store.Find(userID, req.Name, req.Club, wd, req.Start); found && once != "" && prev.Once != "" && prev.Once != once {
@@ -783,7 +820,7 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"error": "already automated once on " + prev.Once + ": choose every week instead", "onceOn": prev.Once})
 			return
 		}
-		rule, err := s.store.Add(userID, req.Name, req.Club, wd, req.Start, once)
+		rule, err := s.store.Add(userID, req.Name, req.Club, wd, req.Start, req.End, once)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

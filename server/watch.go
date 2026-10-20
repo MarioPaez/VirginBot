@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/MarioPaez/VirginBot/automation"
@@ -32,16 +30,6 @@ const (
 	watchNear         = 2 * time.Minute  // ... within the last 3 hours (cancellations peak)
 	watchMaxErrors    = 3                // consecutive failed bookings before giving up on a watch
 )
-
-// watchCutoff is how long before the class watching stops: booking later could
-// leave the user with a class they can't cancel without a late-cancellation
-// penalty. VIRGINBOT_WATCH_CUTOFF_MIN overrides it.
-func watchCutoff() time.Duration {
-	if n, err := strconv.Atoi(os.Getenv("VIRGINBOT_WATCH_CUTOFF_MIN")); err == nil && n >= 0 {
-		return time.Duration(n) * time.Minute
-	}
-	return 2 * time.Hour
-}
 
 var (
 	errWatchLimit = fmt.Errorf("you can watch up to %d classes at a time", maxWatchesPerUser)
@@ -147,6 +135,10 @@ func (s *Server) handleWatches(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		if s.isBooked(userID, req.Name, req.Club, req.Date, req.Start) {
 			writeJSON(w, map[string]any{"ok": false, "error": "you already have this class booked"})
+			return
+		}
+		if other, clash := s.clashingBooking(userID, req.Name, req.Club, req.Date, req.Start, req.End); clash {
+			writeJSON(w, map[string]any{"ok": false, "error": "overlaps another booking", "overlap": other})
 			return
 		}
 		if err := s.addWatch(userID, req.Name, req.Club, req.Date, req.Start); err != nil {
@@ -288,6 +280,10 @@ func (s *Server) pollWatchGroup(club, date string, watches []watch, errs map[str
 			s.removeWatch(w.UserID, w.Name, w.Club, w.Date, w.Start)
 			continue
 		}
+		if other, clash := s.clashingBooking(w.UserID, w.Name, w.Club, w.Date, w.Start, beds[0].End); clash {
+			log.Printf("watch: u%d %s %s %s — a spot is free but it overlaps %s %s: not booking", w.UserID, w.Name, w.Date, w.Start, other.Name, other.Start)
+			continue
+		}
 		k := fmt.Sprintf("%d|%s", w.UserID, w.key())
 		if s.grabWatched(w, beds) {
 			delete(errs, k)
@@ -331,7 +327,9 @@ func (s *Server) grabWatched(w watch, beds []calendar.Class) bool {
 		attempt.Outcome = automation.OutcomeBooked
 		s.store.RecordAttempt(attempt)
 		s.MarkBotBooked(w.UserID, w.Name, w.Club, w.Date, w.Start)
-		s.notifyClass(w.UserID, w.Name, w.Club, w.Date, w.Start, "/?view=bookings", "push.watch.booked.title")
+		at, _ := s.startOf(w.Date, w.Start)
+		s.notifyClass(w.UserID, w.Name, w.Club, w.Date, w.Start, "/?view=bookings", "push.watch.booked.title",
+			cancelDeadline(at).Format("15:04"))
 		return true
 	}
 	log.Printf("watch: u%d %s %s %s — booking failed: %v", w.UserID, w.Name, w.Date, w.Start, lastErr)

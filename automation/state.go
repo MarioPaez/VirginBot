@@ -75,6 +75,7 @@ const (
 	OutcomeUnavailable = "unavailable" // not bookable (window not open, full) or not in the calendar
 	OutcomeError       = "error"       // the booking or the calendar call failed
 	OutcomeMissed      = "missed"      // a watch ended without a spot
+	OutcomeOverlap     = "overlap"     // not booked: the user has another class at that time
 )
 
 // RecordAttempt appends an attempt to the log.

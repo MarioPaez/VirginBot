@@ -311,6 +311,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"lang":       lang,
 		"isAdmin":    ok && isAdmin(email),
 		"homeClub":   homeClub,
+		// When a booking stops being cancellable: the FE shows "cancel until".
+		"cancelCutoffMin": int(cancelCutoff().Minutes()),
 	})
 }
 

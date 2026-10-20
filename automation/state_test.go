@@ -147,7 +147,7 @@ func TestMemberWindowShortensTriggers(t *testing.T) {
 	store := testStore(t)
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
 	class := now.AddDate(0, 0, 5)
-	if _, err := store.Add(7, "Calisthenics", "Milano Corso Como", int(class.Weekday()), "18:15", ""); err != nil {
+	if _, err := store.Add(7, "Calisthenics", "Milano Corso Como", int(class.Weekday()), "18:15", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	e := NewEngine(store, nil, nil, nil)
@@ -178,5 +178,65 @@ func TestForgetResetsOccurrence(t *testing.T) {
 	e.maybeFire(o, time.Date(2026, 6, 24, 18, 15, 1, 0, loc))
 	if books != 2 {
 		t.Fatalf("after Forget the next fire books again; books=%d", books)
+	}
+}
+
+func TestOverlaps(t *testing.T) {
+	for _, tc := range []struct {
+		a1, a2, b1, b2 string
+		want           bool
+	}{
+		{"18:00", "19:00", "18:30", "19:30", true},
+		{"18:00", "19:00", "19:00", "20:00", false}, // back to back
+		{"18:00", "", "18:45", "19:30", true},       // unknown end: 1 h
+		{"18:00", "18:45", "18:45", "", false},
+		{"07:00", "08:00", "18:00", "19:00", false},
+	} {
+		if got := Overlaps(tc.a1, tc.a2, tc.b1, tc.b2); got != tc.want {
+			t.Errorf("Overlaps(%s–%s, %s–%s) = %v", tc.a1, tc.a2, tc.b1, tc.b2, got)
+		}
+	}
+}
+
+// A rule can't share a time with another enabled rule of the user; different
+// one-off weeks and paused rules don't clash.
+func TestOverlappingRules(t *testing.T) {
+	store := testStore(t)
+	weekly, _ := store.Add(7, "Calisthenics", "Milano Cavour", 1, "18:30", "19:30", "")
+	if r, clash := store.Overlapping(7, "", 1, "19:00", "19:45", ""); !clash || r.ID != weekly.ID {
+		t.Fatal("a weekly rule clashes with another one at the same time")
+	}
+	if _, clash := store.Overlapping(7, "", 2, "19:00", "19:45", ""); clash {
+		t.Fatal("another weekday doesn't clash")
+	}
+	if _, clash := store.Overlapping(8, "", 1, "19:00", "19:45", ""); clash {
+		t.Fatal("rules are per user")
+	}
+	if _, clash := store.Overlapping(7, weekly.ID, 1, "18:30", "19:30", ""); clash {
+		t.Fatal("a rule doesn't clash with itself")
+	}
+	once, _ := store.Add(7, "Cycle", "Milano Cavour", 3, "07:00", "08:00", "2026-11-04")
+	if _, clash := store.Overlapping(7, "", 3, "07:30", "08:30", "2026-11-11"); clash {
+		t.Fatal("one-off rules of different weeks don't clash")
+	}
+	if r, clash := store.Overlapping(7, "", 3, "07:30", "08:30", ""); !clash || r.ID != once.ID {
+		t.Fatal("a weekly rule clashes with a one-off on its weekday")
+	}
+	store.SetEnabled(7, weekly.ID, false)
+	if _, clash := store.Overlapping(7, "", 1, "19:00", "19:45", ""); clash {
+		t.Fatal("a paused rule doesn't clash")
+	}
+}
+
+// The engine never books a class that overlaps another booking of the user.
+func TestBusySkipsBooking(t *testing.T) {
+	loc := mustLoc(t)
+	var books int
+	e := NewEngine(nil, fullClass("bookable"), func(int64, int, int, int, string) error { books++; return nil }, nil)
+	e.loc, e.gap, e.gap1, e.lead = loc, 0, 0, 0
+	e.SetBusy(func(int64, Rule, string) (string, bool) { return "Cycle 18:00", true })
+	e.maybeFire(sampleOcc(loc), time.Date(2026, 6, 23, 18, 15, 1, 0, loc))
+	if books != 0 {
+		t.Fatalf("must not book over another booking; books=%d", books)
 	}
 }

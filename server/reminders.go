@@ -3,6 +3,8 @@ package server
 import (
 	"log"
 	"time"
+
+	"github.com/MarioPaez/VirginBot/account"
 )
 
 // reminderGrace: a reminder is only sent close to its due time. A class booked
@@ -27,9 +29,9 @@ type reminder struct {
 // dueReminders returns the reminders due at now, not sent yet. The rows are
 // drained before returning: the pool has a single connection.
 func (s *Server) dueReminders(now time.Time) []reminder {
-	rows, err := s.db.Query(`SELECT b.user_id, b.name, b.club, b.date, b.start, u.reminder_hours
+	rows, err := s.db.Query(`SELECT b.user_id, b.name, b.club, b.date, b.start, `+account.ReminderSQL+`
 		FROM bookings b JOIN users u ON u.id = b.user_id
-		WHERE b.status = 'booked' AND u.reminder_hours > 0 AND b.date >= ? AND b.date <= ?
+		WHERE b.status = 'booked' AND `+account.ReminderSQL+` > 0 AND b.date >= ? AND b.date <= ?
 		  AND NOT EXISTS (SELECT 1 FROM reminders_sent r WHERE r.user_id = b.user_id AND r.name = b.name
 		                  AND r.club = b.club AND r.date = b.date AND r.start = b.start)`,
 		now.Format("2006-01-02"), now.AddDate(0, 0, 2).Format("2006-01-02"))
@@ -65,6 +67,8 @@ func (s *Server) reminderCycle(now time.Time) {
 			log.Printf("reminders u%d: %v", r.userID, err)
 			continue
 		}
-		s.notifyClass(r.userID, r.name, r.club, r.date, r.start, "/?view=bookings", "push.reminder.title")
+		at, _ := s.startOf(r.date, r.start)
+		s.notifyClass(r.userID, r.name, r.club, r.date, r.start, "/?view=bookings", "push.reminder.title",
+			cancelDeadline(at).Format("15:04"))
 	}
 }

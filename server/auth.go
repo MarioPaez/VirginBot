@@ -44,6 +44,8 @@ type Auth struct {
 	alertMu   sync.Mutex
 	alert     func(subject, body string)
 	lastAlert time.Time
+
+	credsRejected func(userID int64) // the user's stored password stopped working; nil = nobody told
 }
 
 type authEntry struct {
@@ -66,6 +68,10 @@ func (a *Auth) OnClientRejected(fn func(title, body string)) {
 	a.alert = fn
 	a.alertMu.Unlock()
 }
+
+// OnCredsRejected sets who's told when Virgin rejects a user's STORED password
+// (changed on Virgin's side): their automations stop until they sign in again.
+func (a *Auth) OnCredsRejected(fn func(userID int64)) { a.credsRejected = fn }
 
 // observe fires the (throttled, async) alert on vapi.ErrClientRejected and
 // returns err unchanged, so it can wrap any return.
@@ -102,6 +108,7 @@ func (a *Auth) Login(email, pass string) (int64, error) {
 	a.clients[userID] = &authEntry{client: client, expiry: time.Now().Add(authTTL)}
 	delete(a.rejected, userID) // fresh, valid password
 	a.mu.Unlock()
+	a.store.ClearCredsAlert(userID)
 	return userID, nil
 }
 
@@ -124,6 +131,9 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 	if errors.Is(err, vapi.ErrBadCredentials) {
 		a.rejected[userID] = true
 		log.Printf("auth: u%d — Virgin rejected the stored password; pausing re-logins until the user signs in again", userID)
+		if a.credsRejected != nil {
+			go a.credsRejected(userID)
+		}
 		return nil, errCredsRejected
 	}
 	if err != nil {
