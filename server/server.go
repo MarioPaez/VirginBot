@@ -182,6 +182,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/book", s.requireSession(s.handleBook))
 	mux.HandleFunc("/api/unbook", s.requireSession(s.handleUnbook))
 	mux.HandleFunc("/api/automations", s.requireSession(s.handleAutomations))
+	mux.HandleFunc("/api/watches", s.requireSession(s.handleWatches))
+	mux.HandleFunc("/api/settings", s.requireSession(s.handleSettings))
 	mux.HandleFunc("/api/lang", s.requireSession(s.handleSetLang))
 	mux.HandleFunc("/api/push", s.requireSession(s.handlePush))
 	mux.HandleFunc("/api/push/subscribe", s.requireSession(s.handlePushSubscribe))
@@ -248,6 +250,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 	classes = s.futureOnly(classes)
 	s.markOpening(classes, now)
+	s.markWatched(userID, classes)
 	byDay := map[string][]calendar.Class{}
 	for _, c := range classes {
 		byDay[c.Date] = append(byDay[c.Date], c)

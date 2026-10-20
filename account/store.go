@@ -109,6 +109,28 @@ func (s *Store) SetHomeClub(userID int64, clubID int) error {
 	return err
 }
 
+// ReminderHours returns how many hours before each booking the user wants a
+// reminder (0 = off).
+func (s *Store) ReminderHours(userID int64) int {
+	var h int
+	s.db.QueryRow(`SELECT reminder_hours FROM users WHERE id = ?`, userID).Scan(&h)
+	return h
+}
+
+// FullAction returns what to do when an automated class is still full at its
+// last attempt ("" = just notify, "waitlist", "watch").
+func (s *Store) FullAction(userID int64) string {
+	var a string
+	s.db.QueryRow(`SELECT full_action FROM users WHERE id = ?`, userID).Scan(&a)
+	return a
+}
+
+// SetPrefs stores the user's reminder lead time and full-class fallback.
+func (s *Store) SetPrefs(userID int64, reminderHours int, fullAction string) error {
+	_, err := s.db.Exec(`UPDATE users SET reminder_hours = ?, full_action = ? WHERE id = ?`, reminderHours, fullAction, userID)
+	return err
+}
+
 // ListUserIDs returns the ids of all registered users.
 func (s *Store) ListUserIDs() []int64 {
 	rows, err := s.db.Query(`SELECT id FROM users ORDER BY id`)

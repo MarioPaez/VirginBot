@@ -112,7 +112,9 @@
   .cname span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .cname svg.i { width:18px; height:18px; color:var(--c); }
   .csub { color:var(--muted); font-size:13px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .cact { display:flex; align-items:center; gap:8px; margin-top:10px; }
+  .cact { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .cwatch { display:inline-flex; align-items:center; gap:5px; margin-top:4px; color:var(--text); font-size:13px; font-weight:600; }
+  .cwatch svg.i { width:15px; height:15px; }
   .cact .push { margin-left:auto; }
   .cwho { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
 
@@ -273,7 +275,7 @@
   <div class="top">
     <img src="/logo.svg" class="logo" alt="">
     <h1 class="brand">Virgin<span>Bot</span></h1>
-    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush()" data-i18n-title="menu.account"></button>
+    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush(); loadSettings()" data-i18n-title="menu.account"></button>
   </div>
   <div class="toolbar" id="controls">
     <div class="toolrow">
@@ -308,6 +310,7 @@
   <div class="acct"><div class="avatar" id="avatarLg"></div>
     <div style="min-width:0"><div class="em" id="user"></div><div class="st" data-i18n="header.session">Signed in</div></div></div>
   <div class="sec" id="pushSec" style="display:none"><p class="sec-t" data-i18n="menu.notifications">Notifications</p><div class="pushbox" id="pushBox"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.full">If an automation is still full 24 h before</p><div class="chips" id="fullChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="menu.language">Language</p><div class="seg langseg"></div></div>
   <div class="sec"><button class="btn btn-block btn-danger" onclick="logout()"><svg class="i"><use href="#i-logout"/></svg><span data-i18n="action.logout">Log out</span></button></div>
 </div>
@@ -355,6 +358,7 @@
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5s1.2-6.1 3.5-8.5z"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5a2 2 0 0 0 2 1.5h6a2 2 0 0 0 2-1.5L18 7M9 7V4.5h6V7"/></symbol>
@@ -414,6 +418,7 @@ const I18N = {
     "row.spots": "%d posti liberi", "row.spot1": "1 posto libero", "status.opens": "Apre %s",
     "autosheet.title": "Automatizza questa lezione", "autosheet.weekly": "Ogni settimana", "autosheet.weekly.sub": "Ogni %s alle %s", "autosheet.once": "Solo questa volta", "auto.onlyon": "Solo il <b>%s</b>",
     "admin.engine": "Motore", "admin.lastcycle": "Ultimo ciclo: %s", "admin.engineoff": "Il motore non è attivo su questo server.", "admin.attempts": "Ultimi tentativi", "admin.outcome": "Esito", "admin.source": "Origine", "admin.detail": "Dettaglio", "admin.empty.attempts": "Nessun tentativo registrato.", "admin.lastday": "Ultime 24 h: %d prenotate · %d errori · %d senza posto", "outcome.booked": "Prenotata", "outcome.waitlisted": "In lista", "outcome.unavailable": "Senza posto", "outcome.error": "Errore", "outcome.missed": "Scaduta", "source.engine": "Auto", "source.watch": "Osserva",
+    "action.watch": "Osserva", "watch.on.title": "La sto osservando: tocca per smettere", "watch.off.title": "Prenotala da sola se si libera un posto", "row.watching": "Osservo se si libera un posto", "toast.watching": "Ok: se si libera un posto la prenoto (fino a %d h prima)", "toast.unwatched": "Non la osservo più", "watch.section": "Osservate", "set.full": "Se un'automazione è ancora piena 24 h prima", "set.full.notify": "Avvisami", "set.full.waitlist": "Lista d'attesa", "set.full.watch": "Continua a osservare", "toast.saved": "Salvato ✓",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -450,6 +455,7 @@ const I18N = {
     "row.spots": "Quedan %d plazas", "row.spot1": "Queda 1 plaza", "status.opens": "Abre %s",
     "autosheet.title": "Automatizar esta clase", "autosheet.weekly": "Cada semana", "autosheet.weekly.sub": "Cada %s a las %s", "autosheet.once": "Solo esta vez", "auto.onlyon": "Solo el <b>%s</b>",
     "admin.engine": "Motor", "admin.lastcycle": "Último ciclo: %s", "admin.engineoff": "El motor no está activo en este servidor.", "admin.attempts": "Últimos intentos", "admin.outcome": "Resultado", "admin.source": "Origen", "admin.detail": "Detalle", "admin.empty.attempts": "No hay intentos registrados.", "admin.lastday": "Últimas 24 h: %d reservadas · %d errores · %d sin plaza", "outcome.booked": "Reservada", "outcome.waitlisted": "En lista", "outcome.unavailable": "Sin plaza", "outcome.error": "Error", "outcome.missed": "Expirada", "source.engine": "Auto", "source.watch": "Vigilar",
+    "action.watch": "Vigilar", "watch.on.title": "La estoy vigilando: toca para dejarlo", "watch.off.title": "Resérvala sola si se libera una plaza", "row.watching": "Vigilando por si se libera una plaza", "toast.watching": "Hecho: si se libera una plaza la reservo (hasta %d h antes)", "toast.unwatched": "Ya no la vigilo", "watch.section": "Vigilando", "set.full": "Si una automatización sigue llena 24 h antes", "set.full.notify": "Avísame", "set.full.waitlist": "Lista de espera", "set.full.watch": "Seguir vigilando", "toast.saved": "Guardado ✓",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -486,6 +492,7 @@ const I18N = {
     "row.spots": "%d spots left", "row.spot1": "1 spot left", "status.opens": "Opens %s",
     "autosheet.title": "Automate this class", "autosheet.weekly": "Every week", "autosheet.weekly.sub": "Every %s at %s", "autosheet.once": "Just this once", "auto.onlyon": "Only on <b>%s</b>",
     "admin.engine": "Engine", "admin.lastcycle": "Last cycle: %s", "admin.engineoff": "The engine isn't running on this server.", "admin.attempts": "Latest attempts", "admin.outcome": "Outcome", "admin.source": "Source", "admin.detail": "Detail", "admin.empty.attempts": "No attempts recorded.", "admin.lastday": "Last 24 h: %d booked · %d errors · %d no spot", "outcome.booked": "Booked", "outcome.waitlisted": "Waitlisted", "outcome.unavailable": "No spot", "outcome.error": "Error", "outcome.missed": "Expired", "source.engine": "Auto", "source.watch": "Watch",
+    "action.watch": "Watch", "watch.on.title": "Watching it: tap to stop", "watch.off.title": "Book it on its own if a spot frees up", "row.watching": "Watching for a freed spot", "toast.watching": "Done: if a spot frees up I'll book it (until %d h before)", "toast.unwatched": "Not watching it anymore", "watch.section": "Watching", "set.full": "If an automation is still full 24 h before", "set.full.notify": "Tell me", "set.full.waitlist": "Waitlist", "set.full.watch": "Keep watching", "toast.saved": "Saved ✓",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -529,7 +536,7 @@ async function setLang(v) {
   fetch(`/api/lang?lang=${v}`, { method: "PATCH" }).catch(() => {}); // best-effort (also for the notifications)
   applyI18n();
   if ($("#login").style.display !== "none") return; // only the login is visible: nothing to repaint
-  if ($("#acctSheet").classList.contains("open")) renderPush();
+  if ($("#acctSheet").classList.contains("open")) { renderPush(); renderSettings(); }
   populateFilters();
   render();
 }
@@ -772,6 +779,7 @@ function rowHead(c) {
       <div class="csub">${esc(shortClub(c.club))}${c.instructor ? ` · ${esc(c.instructor)}` : ""}</div>${
       c.booked ? `<div class="cbk">${icon("i-check")}${t("row.booked")}</div>`
       : c.waitlisted ? `<div class="cwl">${icon("i-hourglass")}${t("row.waitlisted", c.waitlistPos)}</div>`
+      : c.watched ? `<div class="cwatch">${icon("i-eye")}${t("row.watching")}</div>`
       : c.status === "waitlist" ? `<div class="cinfo">${c.waitlistCount ? t("row.waitcount", c.waitlistCount) : t("row.waitopen")}</div>`
       : c.status === "bookable" && c.capacity > 0 ? `<div class="cinfo${c.spots <= 3 ? " low" : ""}">${c.spots === 1 ? t("row.spot1") : t("row.spots", c.spots)}</div>`
       : ""}`;
@@ -823,7 +831,10 @@ function classRow(c) {
   }
   const auto = `<button class="autobtn${rule ? " on" : ""}" aria-pressed="${!!rule}" title="${t(rule ? "auto.on.title" : "auto.off.title")}"
       onclick='${rule ? "toggleAuto" : "askAuto"}(${payload(c)}, false)'>${icon(rule ? "i-check" : "i-repeat")}${t("action.auto")}</button>`;
-  return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${auto}${right}</div></div></div>`;
+  const canWatch = !c.booked && !c.waitlisted && (c.watched || c.status === "full" || c.status === "waitlist");
+  const watchBtn = canWatch ? `<button class="autobtn${c.watched ? " on" : ""}" aria-pressed="${!!c.watched}" title="${t(c.watched ? "watch.on.title" : "watch.off.title")}"
+      onclick='toggleWatch(${payload(c)}, ${!c.watched})'>${icon("i-eye")}${t("action.watch")}</button>` : "";
+  return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${auto}${watchBtn}${right}</div></div></div>`;
 }
 
 function renderClasses(rows, isBookings) {
@@ -841,6 +852,7 @@ function renderClasses(rows, isBookings) {
 // skipping the classes you already have booked).
 async function loadAutomations() {
   try { autos = (await (await fetch("/api/automations")).json()) || []; } catch (e) {}
+  try { watches = (await (await fetch("/api/watches")).json()) || []; } catch (e) {}
   if (state.view === "automations") renderAutomations();
 }
 
@@ -963,7 +975,7 @@ const ordWeekday = w => (w === 0 ? 7 : w); // Monday→Sunday (Sunday last)
 
 function renderAutomations() {
   if (!autos.length) {
-    $("#out").innerHTML = `<div class="empty">${t("empty.autos")}</div>`;
+    $("#out").innerHTML = `${watchesSection()}<div class="empty">${t("empty.autos")}</div>`;
     return;
   }
   const cats = [...new Set(autos.map(r => classCategory(r.name)))];
@@ -982,7 +994,7 @@ function renderAutomations() {
     (state.autoCats.size === 0 || state.autoCats.has(classCategory(r.name))));
 
   if (!rows.length) {
-    $("#out").innerHTML = `${filters}<div class="empty">${t("empty.autos.filtered")}</div>`;
+    $("#out").innerHTML = `${watchesSection()}${filters}<div class="empty">${t("empty.autos.filtered")}</div>`;
     return;
   }
 
@@ -995,7 +1007,7 @@ function renderAutomations() {
         <div class="auto-list">${list.map(autoCard).join("")}</div></section>`;
   }).join("");
 
-  $("#out").innerHTML = `${filters}${groups}<p class="hint">${t("auto.hint")}</p>`;
+  $("#out").innerHTML = `${watchesSection()}${filters}${groups}<p class="hint">${t("auto.hint")}</p>`;
 }
 
 function autoCard(r) {
@@ -1087,6 +1099,44 @@ async function toggleAuto(c, on, once = false) {
       render();
     }
   } catch (e) { toast(t("toast.error") + ": " + e, true); }
+}
+
+// ---- watches: book a full class as soon as a spot frees up ----
+let watches = [];
+
+async function toggleWatch(c, on) {
+  try {
+    const res = await (await fetch("/api/watches", { method: on ? "POST" : "DELETE",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) })).json();
+    if (!res.ok) return toast(res.error || t("toast.error"), true);
+    toast(on ? t("toast.watching", Math.round(res.cutoffMin / 60)) : t("toast.unwatched"), false, on ? 5000 : 3500);
+    for (const x of all) // reflect it without reloading the whole calendar
+      if (x.name === c.name && x.club === c.club && x.date === c.date && x.start === c.start) x.watched = on;
+    watches = (await (await fetch("/api/watches")).json()) || [];
+    render();
+  } catch (e) { toast(t("toast.error") + ": " + e, true); }
+}
+
+function watchCard(w) {
+  const st = catStyle(w.name);
+  return `<div class="auto-card" style="--c:${st.color}">
+    <div class="auto-head">
+      <div class="ctile">${icon("i-eye")}</div>
+      <div class="auto-titles"><div class="auto-title">${esc(w.name)}</div><div class="auto-club">${esc(shortClub(w.club))} · ${fmtItDate(w.date)}</div></div>
+      <div class="auto-time">${w.start}</div>
+    </div>
+    <div class="auto-foot">
+      <span class="pill off">${t("row.watching")}</span>
+      <button class="linkbtn danger" style="margin-left:auto" onclick='toggleWatch(${payload(w)}, false)'>${icon("i-x")}${t("auto.remove")}</button>
+    </div>
+  </div>`;
+}
+
+function watchesSection() {
+  if (!watches.length) return "";
+  return `<section class="daygroup">
+      <div class="daygroup-head"><span class="dow">${t("watch.section")}</span><span class="count">${watches.length}</span></div>
+      <div class="auto-list">${watches.map(watchCard).join("")}</div></section>`;
 }
 
 async function removeAuto(id) {
@@ -1198,6 +1248,30 @@ async function logout() {
   } catch (e) { /* best-effort */ }
   await fetch("/api/logout", { method: "POST" });
   location.reload();
+}
+
+// ---- settings (account sheet) ----
+let settings = { reminderHours: 0, fullAction: "" };
+
+async function loadSettings() {
+  try { settings = await (await fetch("/api/settings")).json(); } catch (e) {}
+  renderSettings();
+}
+
+function renderSettings() {
+  $("#fullChips").innerHTML = [["", "set.full.notify"], ["waitlist", "set.full.waitlist"], ["watch", "set.full.watch"]]
+    .map(([v, k]) => `<button class="chip${settings.fullAction === v ? " active" : ""}" onclick="saveSettings({ fullAction: '${v}' })">${t(k)}</button>`).join("");
+}
+
+async function saveSettings(patch) {
+  try {
+    const res = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...settings, ...patch }) });
+    if (!res.ok) throw new Error(await res.text());
+    settings = await res.json();
+    renderSettings();
+    toast(t("toast.saved"));
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
 }
 
 // ---- push notifications (account sheet) ----

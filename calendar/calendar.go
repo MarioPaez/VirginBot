@@ -54,6 +54,8 @@ type Class struct {
 	// "unavailable" classes whose window is still in the future.
 	OpensAt string `json:"opensAt,omitempty"`
 
+	Watched bool `json:"watched"` // I'm watching it: VirginBot books it if a spot frees up
+
 	Waitlisted    bool `json:"waitlisted"`    // I'm on its waitlist
 	WaitlistPos   int  `json:"waitlistPos"`   // my position (1 = next in line), if Waitlisted
 	WaitlistCount int  `json:"waitlistCount"` // people waiting

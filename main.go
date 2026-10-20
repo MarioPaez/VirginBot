@@ -151,7 +151,12 @@ func main() {
 	if os.Getenv("VIRGINBOT_NO_ENGINE") == "1" {
 		log.Println("automation engine DISABLED (VIRGINBOT_NO_ENGINE=1)")
 	} else {
+		engine.SetOnBooked(func(userID int64, r automation.Rule, date string) {
+			srv.MarkBotBooked(userID, r.Name, r.Club, date, r.Start)
+		})
+		engine.SetOnMissed(srv.OnEngineMissed)
 		go engine.Run(make(chan struct{}))
+		go srv.RunWatches() // books for real too: only where the engine runs
 		srv.SetEngineHealth(engine.LastCycle)
 		if adminAlert != nil {
 			go automation.Watchdog(engine, adminAlert)
