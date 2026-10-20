@@ -105,6 +105,7 @@
   .cwl { display:inline-flex; align-items:center; gap:5px; margin-top:4px; color:#fcd34d; font-size:13px; font-weight:600; }
   .cwl svg.i { width:15px; height:15px; }
   .cinfo { margin-top:4px; color:var(--dim); font-size:12.5px; }
+  .cinfo.low { color:var(--muted); font-weight:600; }
   .btn-wait { background:var(--warn-soft); border-color:rgba(245,158,11,.4); color:#fcd34d; }
   .cmain { min-width:0; }
   .cname { display:flex; align-items:center; gap:7px; font-weight:600; font-size:15.5px; }
@@ -392,6 +393,7 @@ const I18N = {
     "menu.notifications": "Notifiche", "push.hint": "Ti avviso all'istante quando prenoto una lezione o non trovo posto.", "push.enable": "Attiva notifiche", "push.on": "Attive su questo dispositivo", "push.test": "Invia una prova", "push.disable": "Disattiva", "push.ios": "Per ricevere notifiche sull'iPhone, aggiungi VirginBot alla schermata Home e aprila da lì.", "push.denied": "Le notifiche sono bloccate per VirginBot nelle impostazioni del dispositivo.", "push.unsupported": "Questo browser non supporta le notifiche.", "toast.push.on": "Notifiche attivate ✓", "toast.push.off": "Notifiche disattivate", "toast.push.test": "Prova inviata",
     "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Entra", "login.loading": "Accesso…",
+    "row.spots": "%d posti liberi", "row.spot1": "1 posto libero", "status.opens": "Apre %s",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -425,6 +427,7 @@ const I18N = {
     "menu.notifications": "Notificaciones", "push.hint": "Te aviso al instante cuando reserve una clase o no consiga plaza.", "push.enable": "Activar notificaciones", "push.on": "Activadas en este dispositivo", "push.test": "Enviar prueba", "push.disable": "Desactivar", "push.ios": "Para recibir notificaciones en el iPhone, añade VirginBot a la pantalla de inicio y ábrela desde ahí.", "push.denied": "Las notificaciones están bloqueadas para VirginBot en los ajustes del dispositivo.", "push.unsupported": "Este navegador no admite notificaciones.", "toast.push.on": "Notificaciones activadas ✓", "toast.push.off": "Notificaciones desactivadas", "toast.push.test": "Prueba enviada",
     "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
     "login.email": "Email", "login.pass": "Contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
+    "row.spots": "Quedan %d plazas", "row.spot1": "Queda 1 plaza", "status.opens": "Abre %s",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -458,6 +461,7 @@ const I18N = {
     "menu.notifications": "Notifications", "push.hint": "I'll tell you instantly when I book a class or can't get a spot.", "push.enable": "Turn on notifications", "push.on": "On for this device", "push.test": "Send a test", "push.disable": "Turn off", "push.ios": "To get notifications on iPhone, add VirginBot to your Home Screen and open it from there.", "push.denied": "Notifications are blocked for VirginBot in your device settings.", "push.unsupported": "This browser doesn't support notifications.", "toast.push.on": "Notifications on ✓", "toast.push.off": "Notifications off", "toast.push.test": "Test sent",
     "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Sign in", "login.loading": "Signing in…",
+    "row.spots": "%d spots left", "row.spot1": "1 spot left", "status.opens": "Opens %s",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -736,6 +740,7 @@ function rowHead(c) {
       c.booked ? `<div class="cbk">${icon("i-check")}${t("row.booked")}</div>`
       : c.waitlisted ? `<div class="cwl">${icon("i-hourglass")}${t("row.waitlisted", c.waitlistPos)}</div>`
       : c.status === "waitlist" ? `<div class="cinfo">${c.waitlistCount ? t("row.waitcount", c.waitlistCount) : t("row.waitopen")}</div>`
+      : c.status === "bookable" && c.capacity > 0 ? `<div class="cinfo${c.spots <= 3 ? " low" : ""}">${c.spots === 1 ? t("row.spot1") : t("row.spots", c.spots)}</div>`
       : ""}`;
 }
 
@@ -777,6 +782,8 @@ function classRow(c) {
     right = `<button class="btn btn-primary push" onclick='act("book", ${payload(c)})'>${t("action.book")}</button>`;
   else if (c.status === "waitlist")
     right = `<button class="btn btn-wait push" onclick='act("book", ${payload(c)})'>${t("action.joinwait")}</button>`;
+  else if (c.opensAt && new Date(c.opensAt) > new Date())
+    right = `<span class="pill off push">${t("status.opens", relWhen(c.opensAt))}</span>`;
   else {
     const [cls, key] = STATUS_PILL[c.status] || ["off", "status.unavailable"];
     right = `<span class="pill ${cls} push">${t(key)}</span>`;

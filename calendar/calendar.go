@@ -48,6 +48,12 @@ type Class struct {
 	// waitlist full or closed), "unavailable" (window not open / other).
 	Status string `json:"status"`
 
+	Spots    int `json:"spots"`    // free places (capacity − booked); summed over the Solarium beds
+	Capacity int `json:"capacity"` // places in the class (all beds, for the Solarium)
+	// OpensAt (RFC 3339) is when the booking window opens, set only on
+	// "unavailable" classes whose window is still in the future.
+	OpensAt string `json:"opensAt,omitempty"`
+
 	Waitlisted    bool `json:"waitlisted"`    // I'm on its waitlist
 	WaitlistPos   int  `json:"waitlistPos"`   // my position (1 = next in line), if Waitlisted
 	WaitlistCount int  `json:"waitlistCount"` // people waiting

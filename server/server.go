@@ -224,8 +224,10 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	classes = s.futureOnly(classes)
+	s.markOpening(classes, now)
 	byDay := map[string][]calendar.Class{}
-	for _, c := range s.futureOnly(classes) {
+	for _, c := range classes {
 		byDay[c.Date] = append(byDay[c.Date], c)
 	}
 	out := make([]calendarDay, 0, days)
@@ -282,7 +284,8 @@ func (s *Server) downloadClasses(userID int64, clubs []int, start, end time.Time
 
 // dedupe collapses the instances of the same class (same club, name, date and
 // time) into a single row —e.g. the Solarium has many "beds", each a distinct
-// bookable class— preferring the most bookable instance.
+// bookable class— preferring the most bookable instance. Spots and capacity are
+// summed over the instances, so the row tells how many beds are free.
 func dedupe(classes []calendar.Class) []calendar.Class {
 	rank := map[string]int{"bookable": 4, "waitlist": 3, "full": 2, "unavailable": 1}
 	best := map[string]int{} // key -> index in out
@@ -290,15 +293,36 @@ func dedupe(classes []calendar.Class) []calendar.Class {
 	for _, c := range classes {
 		k := c.Date + "|" + c.Club + "|" + c.Name + "|" + c.Start
 		if i, ok := best[k]; ok {
+			spots, capacity := out[i].Spots+c.Spots, out[i].Capacity+c.Capacity
 			if rank[c.Status] > rank[out[i].Status] {
 				out[i] = c
 			}
+			out[i].Spots, out[i].Capacity = spots, capacity
 			continue
 		}
 		best[k] = len(out)
 		out = append(out, c)
 	}
 	return out
+}
+
+// markOpening sets OpensAt on the classes that are unavailable only because
+// their booking window hasn't opened yet (the engine's first fire: class time −
+// window days), so the calendar can say when instead of "unavailable".
+func (s *Server) markOpening(classes []calendar.Class, now time.Time) {
+	for i := range classes {
+		c := &classes[i]
+		if c.Status != "unavailable" {
+			continue
+		}
+		start, err := time.ParseInLocation("2006-01-02 15:04", c.Date+" "+c.Start, s.loc)
+		if err != nil {
+			continue
+		}
+		if open := start.AddDate(0, 0, -automation.WindowDays(c.Name)); open.After(now) {
+			c.OpensAt = open.Format(time.RFC3339)
+		}
+	}
 }
 
 // overlayBooked marks the classes the user already has in the bookings table:

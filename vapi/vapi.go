@@ -96,9 +96,15 @@ type apiClass struct {
 	BookableStatus  string          `json:"bookableStatus"`
 	StudioName      string          `json:"studioName"`
 	Instructors     []apiInstructor `json:"instructors"`
+	BookingCount    int             `json:"bookingCount"`
+	BookingCap      int             `json:"bookingCapacity"`
 	WaitlistCount   int             `json:"waitlistCount"`
 	WaitlistCap     int             `json:"waitlistCapacity"`
 }
+
+// spots is how many places are still free (never negative: vapi counts priority
+// bookings on top of the capacity).
+func (k apiClass) spots() int { return max(0, k.BookingCap-k.BookingCount) }
 
 func instructorsOf(ins []apiInstructor) string {
 	names := make([]string, 0, len(ins))
@@ -136,6 +142,7 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 				Instructor: instructorsOf(k.Instructors),
 				ClubID:     clubID, ClassID: k.ID, SessionID: k.SessionID,
 				Status:        mapStatus(k.BookableStatus),
+				Spots:         k.spots(), Capacity: k.BookingCap,
 				WaitlistCount: k.WaitlistCount, WaitlistCap: k.WaitlistCap,
 			})
 		}

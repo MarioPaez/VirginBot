@@ -19,7 +19,11 @@ CREATE TABLE IF NOT EXISTS users (
     email   TEXT NOT NULL UNIQUE,
     pass    BLOB NOT NULL,
     created TEXT NOT NULL,
-    lang    TEXT NOT NULL DEFAULT ''
+    lang    TEXT NOT NULL DEFAULT '',
+    home_club      INTEGER NOT NULL DEFAULT 0,  -- vapi clubId of the member's home club (0 = unknown)
+    cal_token      TEXT NOT NULL DEFAULT '',    -- secret of the private .ics feed ('' = not created)
+    reminder_hours INTEGER NOT NULL DEFAULT 0,  -- push a reminder N hours before each booking (0 = off)
+    full_action    TEXT NOT NULL DEFAULT ''     -- automated class still full at its last attempt: '' | 'waitlist' | 'watch'
 );
 CREATE TABLE IF NOT EXISTS automations (
     user_id           INTEGER NOT NULL,
@@ -31,6 +35,7 @@ CREATE TABLE IF NOT EXISTS automations (
     opens_days_before INTEGER NOT NULL,
     enabled           INTEGER NOT NULL,
     created           TEXT NOT NULL,
+    once_date         TEXT NOT NULL DEFAULT '', -- YYYY-MM-DD: book only that occurrence ('' = every week)
     PRIMARY KEY (user_id, id)
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -67,6 +72,69 @@ CREATE TABLE IF NOT EXISTS skips (
     rule_id TEXT NOT NULL,
     date    TEXT NOT NULL,
     PRIMARY KEY (user_id, rule_id, date)
+);
+CREATE TABLE IF NOT EXISTS watches (
+    user_id INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    club    TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    start   TEXT NOT NULL,
+    created TEXT NOT NULL,
+    PRIMARY KEY (user_id, name, club, date, start)
+);
+CREATE TABLE IF NOT EXISTS reminders_sent (
+    user_id INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    club    TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    start   TEXT NOT NULL,
+    PRIMARY KEY (user_id, name, club, date, start)
+);
+CREATE TABLE IF NOT EXISTS fav_instructors (
+    user_id INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    PRIMARY KEY (user_id, name)
+);
+CREATE TABLE IF NOT EXISTS history (
+    user_id    INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    club       TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    start      TEXT NOT NULL,
+    end_time   TEXT NOT NULL DEFAULT '',
+    instructor TEXT NOT NULL DEFAULT '',
+    by_bot     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, name, club, date, start)
+);
+CREATE TABLE IF NOT EXISTS bot_bookings (
+    user_id INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    club    TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    start   TEXT NOT NULL,
+    PRIMARY KEY (user_id, name, club, date, start)
+);
+CREATE TABLE IF NOT EXISTS engine_state (
+    key           TEXT PRIMARY KEY, -- userID|ruleID|date
+    date          TEXT NOT NULL,
+    booked        INTEGER NOT NULL DEFAULT 0,
+    waitlisted    INTEGER NOT NULL DEFAULT 0,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT NOT NULL DEFAULT '',
+    miss_notified INTEGER NOT NULL DEFAULT 0,
+    last_fired    TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS engine_attempts (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts      TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    club    TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    start   TEXT NOT NULL,
+    source  TEXT NOT NULL, -- 'engine' | 'watch'
+    outcome TEXT NOT NULL, -- 'booked' | 'waitlisted' | 'failed' | 'error' | ...
+    detail  TEXT NOT NULL DEFAULT ''
 );
 `
 
@@ -138,6 +206,19 @@ func migrate(d *sql.DB) error {
 	}
 	// i18n: user's preferred language (empty = not detected yet).
 	if err := ensureColumn(d, "users", "lang", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	for _, c := range [][2]string{
+		{"home_club", "INTEGER NOT NULL DEFAULT 0"},
+		{"cal_token", "TEXT NOT NULL DEFAULT ''"},
+		{"reminder_hours", "INTEGER NOT NULL DEFAULT 0"},
+		{"full_action", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := ensureColumn(d, "users", c[0], c[1]); err != nil {
+			return err
+		}
+	}
+	if err := ensureColumn(d, "automations", "once_date", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 
