@@ -23,33 +23,42 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 
 ## Screenshots
 
-| Calendar | Filters | Automations |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/calendar.png" width="260" alt="Calendar"> | <img src="docs/screenshots/filters.png" width="260" alt="Filter sheet"> | <img src="docs/screenshots/automations.png" width="260" alt="Automations"> |
-| Live classes for the next 10 days, one tap to book or automate. | Filter by class, Pilates variant and club. | Weekly rules with the next attempt and the class it will book. |
+| Calendar | Filters | Automations | Your activity |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/screenshots/calendar.png" width="200" alt="Calendar"> | <img src="docs/screenshots/filters.png" width="200" alt="Filter sheet"> | <img src="docs/screenshots/automations.png" width="200" alt="Automations and watches"> | <img src="docs/screenshots/stats.png" width="200" alt="Bookings and stats"> |
+| Live classes with spots left, one tap to book, automate or watch. | Filter by class, Pilates variant, club and instructor. | Watched classes and weekly rules with their next attempt. | Bookings with their cancel deadline, and your stats. |
 
 ## Features
 
 **Calendar**
-- Live classes for the next 10 days across the configured clubs (Milano Corso Como, Milano Cavour, Palermo), with real availability: bookable, full or not yet open.
-- A date strip to jump to a day, plus a filter sheet: class (Calisthenics, Lift, Pilates, Solarium, Full Body, TRX, Cycle), Pilates variant (Reformer Align, Athletic, Tower…) and club.
-- Book and cancel in one tap. *My bookings* always matches the official app, because both read the same backend.
-- **Waitlists:** on a full class, join its waitlist in one tap ("Full · 3 waiting"). *My bookings* shows your position and lets you leave it, and you get a push notification the moment you're moved into the class.
+- Live classes for the next 10 days across the configured clubs (Milano Corso Como, Milano Cavour, Palermo), with real availability: spots left, full ("Full · 3 waiting"), or when booking opens for *you* ("Opens Mon 18:15").
+- A date strip to jump to a day, plus a filter sheet: class, Pilates variant, club (your home club by default) and instructor, with a searchable list where you star your favourite instructors.
+- Book and cancel in one tap. Every booking shows until when it can still be cancelled (Virgin allows it up to 2 h before the class).
+- **Waitlists:** join a full class's waitlist in one tap, see your position, and get a push notification the moment you're moved into the class.
+- **Watch** a full class: VirginBot checks it every few minutes and books it as soon as a spot frees up, until 3 h before the class so you can still cancel it.
 
 **Automations**
-- Tap **Auto** on a class and VirginBot books that class **every week**.
-- It tries at the class time on each day from the moment the window opens (8 days before; 2 for the Solarium) until 24 h before. Each attempt is a short burst of up to 9 tries over about a minute, because Virgin sometimes opens the slot a few seconds late.
-- Cancelling one booking keeps the automation and only skips that date. You get a notice saying so, and booking that date again by hand clears the skip.
-- Pause or remove any rule. Each rule shows when the next attempt is and which class it will book.
+- Tap **Auto** on a class and choose **every week** or **just this once**.
+- It tries at the class time on each day from the moment your booking window opens (8 days before for priority members, 2 for everyone else and for the Solarium) until 24 h before. Each attempt is a short burst of up to 9 tries over about a minute, because Virgin sometimes opens the slot a few seconds late.
+- An automation that would overlap another one of yours is refused, saying which one it clashes with, and the bot never books a class that overlaps one you already have.
+- If a class is still full 24 h before, it can just tell you, put you on its waitlist, or keep watching it for you (your choice).
+- Cancelling one booking keeps the automation and only skips that date. Pause or remove any rule; each one shows its next attempt and the class it will book.
+
+**Bookings and stats**
+- **"Did you go?"** after each class, with one tap. Virgin doesn't expose attendance, so this is what makes the stats real.
+- **Your activity:** classes this month, total, how many VirginBot booked, week streak, classes per month, split by type, and your usual class.
+- A warning when you've skipped classes without cancelling: three in 30 days can get your bookings blocked for 15 days.
+- Suggestions to automate the weekly classes you keep going to.
 
 **Everything else**
-- **Who's going:** see which other users have booked the same class, so you can go together.
-- **Push notifications:** install the app on your phone's home screen, turn notifications on in the account sheet, and you get an instant "Booked ✓" or "Couldn't book" on the lock screen. Tapping it opens the right tab. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
-- **Installable app:** add it to the home screen for a full-screen app with its own icon that opens instantly.
+- **Push notifications:** booked, couldn't book, a spot freed up, you're in from the waitlist, a reminder before each class (4 h by default) with the time you can cancel until, a friend booking one of your usual classes, and your Virgin password stopping working. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
+- **Who's going:** see who else booked a class, and book, automate or watch it from there.
+- **Phone calendar:** a private `.ics` subscription link with your bookings.
+- **Installable app:** add it to the home screen for a full-screen app with its own icon. You stay signed in, and the browser offers to save your password.
 - **Multi-user:** an email allowlist, Virgin passwords encrypted at rest, and per-user sessions.
-- **Admin view:** see, pause and remove every user's automations, and see everyone's upcoming bookings.
-- **Three languages:** the web app and notifications are in Italian, Spanish and English, detected from the browser and changeable at any time.
-- **Mobile first:** bottom navigation, bottom sheets, large touch targets and safe-area aware layouts; on desktop it becomes a centred layout with a floating nav bar.
+- **Admin view:** every user's automations and bookings, the engine's health and its latest booking attempts with their outcome.
+- **Three languages:** the web app and notifications are in Italian, Spanish and English.
+- **Mobile first:** bottom navigation, bottom sheets you can swipe down, large touch targets and safe-area aware layouts.
 
 ## How the engine works
 
@@ -62,7 +71,8 @@ class on Mon 18:15, window opens 8 days before
  (T-8: opens)   try            try                 try          try (last) │  class
 ```
 
-- At each trigger it fetches **only that class's club**, finds the session and books it. For the Solarium it tries every bed until one accepts.
+- At each trigger it fetches **only that class's club**, finds the session and books it. Triggers due at the same time run in parallel, so one user's attempt never delays another's.
+- Its state (booked, attempts, notices sent) is stored, so a restart or a deploy doesn't repeat anything.
 - If the booking API errors but the booking actually went through, a final check confirms it before reporting a failure, so you never get a false failure notice or a double booking.
 - After a success it stops for that week; the rule stays active for the next one. If the spot goes in the split second between checking and booking, Virgin puts you on the waitlist instead: the engine stops there and tells you your position.
 
@@ -112,6 +122,8 @@ All settings come from environment variables. The `.env` file is loaded at start
 | `ADDR` | | Listen address. Default `:8080`. |
 | `VIRGINBOT_DB` | | SQLite file. Default `virginbot.db`. |
 | `VIRGINBOT_ATTEMPTS`, `VIRGINBOT_GAP_SEC`, `VIRGINBOT_LEAD_SEC` | | Tune each trigger's burst: attempts (9), seconds between them (8), delay before the first (0). |
+| `VIRGINBOT_CANCEL_CUTOFF_MIN` | | How long before a class Virgin stops accepting cancellations. Default 120. |
+| `VIRGINBOT_WATCH_CUTOFF_MIN` | | When watching a full class stops. Default: the cancel cutoff + 60. |
 | `VIRGINBOT_DEBUG` | | `1` logs every engine evaluation. |
 | `VIRGINBOT_NO_ENGINE` | | `1` disables the engine (local UI work). |
 
@@ -141,7 +153,9 @@ Clubs are identified by vapi's numeric `clubId`. `GET /clubs`, with a signed-in 
 
 - Virgin passwords are encrypted at rest with AES-256-GCM. `APP_SECRET` is mandatory; there is no insecure default.
 - Sign-in is rate-limited per IP and can be restricted with an email allowlist.
-- Session cookies are `HttpOnly`, `Secure` over HTTPS and `SameSite=Lax`, with a 30-day lifetime.
+- Session cookies are `HttpOnly`, `Secure` over HTTPS and `SameSite=Lax`, valid for 30 days since you last opened the app.
+- The login form refuses posts from other sites (login CSRF).
+- The calendar feed is authenticated only by a long random secret in its URL, which you can rotate from the app.
 - `VA_API_KEY` is the app's public static key, but it still lives in secrets, not in the repo. If Virgin rotates it, the admin gets a push notification.
 - `.env`, the database and traffic captures are git-ignored. No secrets are committed.
 
@@ -153,9 +167,9 @@ Pure Go with a single dependency tree and no CGO: SQLite via `modernc.org/sqlite
 |---|---|
 | `vapi/` | Client for Virgin's mobile API: login, classes, bookings, book, cancel. |
 | `calendar/` | The `Class` model and the club id ↔ name mapping. |
-| `automation/` | Rule store, skipped dates, and the precise-timing engine. |
+| `automation/` | Rule store, skipped dates, overlaps, and the precise-timing engine with its persisted state, attempt log and watchdog. |
 | `account/` | Users and encrypted credentials. |
-| `server/` | HTTP API, embedded web app, sessions, per-user API clients, bookings sync, admin. |
+| `server/` | HTTP API, embedded web app, sessions, per-user API clients, bookings sync, watches, reminders, history and stats, calendar feed, admin. |
 | `db/` | SQLite schema and idempotent migrations. |
 | `i18n/` | Dates and notification text in it/es/en. |
 | `push/` | Web Push: payload encryption (RFC 8291), VAPID (RFC 8292) and per-device subscriptions. Standard library only. |
