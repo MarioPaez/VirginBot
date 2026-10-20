@@ -141,6 +141,7 @@
   .autobtn { height:36px; padding:0 12px 0 10px; border-radius:10px; border:1px solid var(--line-2); background:transparent;
              color:var(--muted); font-size:13.5px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
   .autobtn svg.i { width:17px; height:17px; }
+  .autobtn.icon { width:36px; padding:0; justify-content:center; }
   .autobtn.on { background:var(--text); border-color:var(--text); color:var(--bg); font-weight:600; }  /* selected, like the filters: green stays for "booked" */
   .linkbtn { height:40px; padding:0 12px; border-radius:10px; border:none; background:transparent; color:var(--muted);
              font-size:14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
@@ -930,8 +931,10 @@ function classActions(c) {
   const auto = `<button class="autobtn${rule ? " on" : ""}" aria-pressed="${!!rule}" title="${t(rule ? "auto.on.title" : "auto.off.title")}"
       onclick='${rule ? "toggleAuto" : "askAuto"}(${payload(c)}, false)'>${icon(rule ? "i-check" : "i-repeat")}${t("action.auto")}</button>`;
   const canWatch = !c.booked && !c.waitlisted && (c.watched || c.status === "full" || c.status === "waitlist");
-  const watchBtn = canWatch ? `<button class="autobtn${c.watched ? " on" : ""}" aria-pressed="${!!c.watched}" title="${t(c.watched ? "watch.on.title" : "watch.off.title")}"
-      onclick='toggleWatch(${payload(c)}, ${!c.watched})'>${icon("i-eye")}${t("action.watch")}</button>` : "";
+  // Icon-only: three labelled buttons don't fit a phone row (the state is spelled
+  // out in the row: "Watching for a freed spot").
+  const watchBtn = canWatch ? `<button class="autobtn icon${c.watched ? " on" : ""}" aria-pressed="${!!c.watched}" title="${t(c.watched ? "watch.on.title" : "watch.off.title")}"
+      aria-label="${t("action.watch")}" onclick='toggleWatch(${payload(c)}, ${!c.watched})'>${icon("i-eye")}</button>` : "";
   return auto + watchBtn + right;
 }
 
