@@ -211,6 +211,13 @@
   .pushbox .on svg.i { width:16px; height:16px; stroke-width:2.6; }
   .pushbox .row { display:flex; gap:8px; }
   .pushbox .row .btn { flex:1; }
+  .choices { display:grid; gap:10px; margin-top:14px; }
+  .choice { display:flex; align-items:center; gap:14px; width:100%; padding:14px; border-radius:14px; text-align:left;
+            border:1px solid var(--line-2); background:var(--surface-2); cursor:pointer; }
+  .choice:active { border-color:var(--text); }
+  .choice svg.i { width:22px; height:22px; color:var(--muted); }
+  .choice b { display:block; font-size:15px; }
+  .choice small { display:block; color:var(--muted); font-size:13px; margin-top:2px; }
   .seg { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:4px; border-radius:12px; background:var(--surface-2); }
   .seg button { height:36px; border:none; border-radius:9px; background:transparent; color:var(--muted); font-weight:600; cursor:pointer; }
   .seg button.active { background:var(--text); color:var(--bg); }
@@ -304,6 +311,16 @@
   <div class="sec"><button class="btn btn-block btn-danger" onclick="logout()"><svg class="i"><use href="#i-logout"/></svg><span data-i18n="action.logout">Log out</span></button></div>
 </div>
 
+<div class="sheet" id="autoSheet" role="dialog" aria-modal="true">
+  <div class="grab"></div>
+  <h2 data-i18n="autosheet.title">Automate this class</h2>
+  <p class="sec-t" id="autoSheetSub"></p>
+  <div class="choices">
+    <button class="choice" id="autoWeekly" onclick="chooseAuto(false)"></button>
+    <button class="choice" id="autoOnce" onclick="chooseAuto(true)"></button>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <div id="login" class="login-overlay" style="display:none">
@@ -394,6 +411,7 @@ const I18N = {
     "login.sub": "Accedi con il tuo account Virgin Active. Le credenziali si salvano cifrate per prenotare al posto tuo.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Entra", "login.loading": "Accesso…",
     "row.spots": "%d posti liberi", "row.spot1": "1 posto libero", "status.opens": "Apre %s",
+    "autosheet.title": "Automatizza questa lezione", "autosheet.weekly": "Ogni settimana", "autosheet.weekly.sub": "Ogni %s alle %s", "autosheet.once": "Solo questa volta", "auto.onlyon": "Solo il <b>%s</b>",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
   es: {
@@ -428,6 +446,7 @@ const I18N = {
     "login.sub": "Entra con tu cuenta de Virgin Active. Tus credenciales se guardan cifradas para reservar por ti.",
     "login.email": "Email", "login.pass": "Contraseña", "login.submit": "Entrar", "login.loading": "Entrando…",
     "row.spots": "Quedan %d plazas", "row.spot1": "Queda 1 plaza", "status.opens": "Abre %s",
+    "autosheet.title": "Automatizar esta clase", "autosheet.weekly": "Cada semana", "autosheet.weekly.sub": "Cada %s a las %s", "autosheet.once": "Solo esta vez", "auto.onlyon": "Solo el <b>%s</b>",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
   en: {
@@ -462,6 +481,7 @@ const I18N = {
     "login.sub": "Sign in with your Virgin Active account. Your credentials are stored encrypted so I can book for you.",
     "login.email": "Email", "login.pass": "Password", "login.submit": "Sign in", "login.loading": "Signing in…",
     "row.spots": "%d spots left", "row.spot1": "1 spot left", "status.opens": "Opens %s",
+    "autosheet.title": "Automate this class", "autosheet.weekly": "Every week", "autosheet.weekly.sub": "Every %s at %s", "autosheet.once": "Just this once", "auto.onlyon": "Only on <b>%s</b>",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
 };
@@ -554,7 +574,7 @@ const icon = (id, cls = "i") => `<svg class="${cls}"><use href="#${id}"/></svg>`
 
 const weekdayOf = date => new Date(date + "T00:00:00").getDay();
 const ruleFor = c => autos.find(r =>
-  r.name === c.name && r.club === c.club && r.start === c.start && r.weekday === weekdayOf(c.date));
+  r.name === c.name && r.club === c.club && r.start === c.start && r.weekday === weekdayOf(c.date) && (!r.once || r.once === c.date));
 const shortClub = club => club.replace(/^Milano\s+/i, "");
 const minutesBetween = (a, b) => { const m = s => +s.slice(0, 2) * 60 + +s.slice(3, 5); return m(b) - m(a); };
 // esc escapes text for HTML and for single-quoted attributes (onclick payloads).
@@ -798,7 +818,7 @@ function classRow(c) {
     right = `<span class="pill ${cls} push">${t(key)}</span>`;
   }
   const auto = `<button class="autobtn${rule ? " on" : ""}" aria-pressed="${!!rule}" title="${t(rule ? "auto.on.title" : "auto.off.title")}"
-      onclick='toggleAuto(${payload(c)}, ${!rule})'>${icon(rule ? "i-check" : "i-repeat")}${t("action.auto")}</button>`;
+      onclick='${rule ? "toggleAuto" : "askAuto"}(${payload(c)}, false)'>${icon(rule ? "i-check" : "i-repeat")}${t("action.auto")}</button>`;
   return `<div class="crow${c.booked ? " booked" : c.waitlisted ? " waitl" : ""}">${rowHead(c)}<div class="cact">${auto}${right}</div></div></div>`;
 }
 
@@ -950,10 +970,10 @@ function renderAutomations() {
 function autoCard(r) {
   const st = catStyle(r.name);
   const paused = !r.enabled;
-  const meta = paused
+  const meta = (r.once ? `<div>${t("auto.onlyon", fmtItDate(r.once))}</div>` : "") + (paused
     ? `<div>${t("auto.willnotrun")}</div>`
     : (r.nextAttempt ? `<div>${t("auto.next", relWhen(r.nextAttempt))}</div>` : "")
-      + (r.nextClass ? `<div>${t("auto.willbook", fmtItDate(r.nextClass))}</div>` : "");
+      + (r.nextClass && !r.once ? `<div>${t("auto.willbook", fmtItDate(r.nextClass))}</div>` : ""));
   return `<div class="auto-card${paused ? " paused" : ""}" style="--c:${st.color}">
     <div class="auto-head">
       <div class="ctile">${icon(st.icon)}</div>
@@ -1002,10 +1022,27 @@ async function act(kind, c) {
   } catch (e) { toast(t("toast.error") + ": " + e, true); }
 }
 
-async function toggleAuto(c, on) {
+// askAuto lets the user pick between every week and only this occurrence.
+let autoPending = null;
+function askAuto(c) {
+  autoPending = c;
+  const day = new Date(c.date + "T00:00");
+  $("#autoSheetSub").textContent = `${c.name} · ${shortClub(c.club)} · ${c.start}`;
+  $("#autoWeekly").innerHTML = `${icon("i-repeat")}<span><b>${t("autosheet.weekly")}</b><small>${
+    t("autosheet.weekly.sub", day.toLocaleDateString(loc(), { weekday: "long" }), c.start)}</small></span>`;
+  $("#autoOnce").innerHTML = `${icon("i-cal")}<span><b>${t("autosheet.once")}</b><small>${fmtItDate(c.date)}</small></span>`;
+  openSheet("autoSheet");
+}
+function chooseAuto(once) {
+  closeSheets();
+  if (autoPending) toggleAuto(autoPending, true, once);
+  autoPending = null;
+}
+
+async function toggleAuto(c, on, once = false) {
   try {
     if (on) {
-      const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(c)})).json();
+      const res = await (await fetch(`/api/automations`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ ...c, once })})).json();
       toast(res.booked ? t("toast.bookedbang") : res.waitlistPos ? t("toast.autowaitlisted", res.waitlistPos) : t("toast.autoadded"),
         false, res.waitlistPos ? 7000 : 3500);
       autos = (await (await fetch(`/api/automations`)).json()) || [];

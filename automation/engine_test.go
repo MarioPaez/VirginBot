@@ -225,7 +225,7 @@ func TestPausedRuleNotScheduled(t *testing.T) {
 
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
 	wd := int(now.AddDate(0, 0, 2).Weekday()) // class 2 days later (within the horizon)
-	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", wd, "23:30")
+	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", wd, "23:30", "")
 	if err != nil {
 		t.Fatalf("add rule: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestSkippedOccurrenceNotScheduled(t *testing.T) {
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
 	day := now.AddDate(0, 0, 1) // tomorrow; the same weekday recurs at +8, still within the horizon
 	wd, date := int(day.Weekday()), day.Format("2006-01-02")
-	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", wd, "18:15")
+	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", wd, "18:15", "")
 	if err != nil {
 		t.Fatalf("add rule: %v", err)
 	}
@@ -380,5 +380,50 @@ func TestFinalReconcileConfirmsBooking(t *testing.T) {
 	}
 	if okNotices != 1 {
 		t.Fatalf("must confirm the booking in the final reconciliation; okNotices=%d", okNotices)
+	}
+}
+
+// A one-off rule schedules only its own date, switching it to weekly schedules
+// every week again, and it's purged once its date has passed.
+func TestOnceRuleOnlyItsDate(t *testing.T) {
+	loc := mustLoc(t)
+	dbh, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("open DB: %v", err)
+	}
+	defer dbh.Close()
+	store := NewStore(dbh)
+
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc) // Wednesday
+	first := now.AddDate(0, 0, 1)                  // Thursday 2/7; Thursday 9/7 is also in the horizon
+	once := first.Format("2006-01-02")
+	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", int(first.Weekday()), "18:15", once)
+	if err != nil {
+		t.Fatalf("add rule: %v", err)
+	}
+	e := NewEngine(store, nil, nil, nil)
+	e.loc = loc
+
+	occs := e.occurrences(now)
+	if countOcc(occs, rule.ID) != 1 || occs[0].date != once {
+		t.Fatalf("a one-off rule must schedule only %s: %+v", once, occs)
+	}
+	if _, err := store.Add(7, "Calisthenics", "Milano Corso Como", int(first.Weekday()), "18:15", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := countOcc(e.occurrences(now), rule.ID); got != 2 {
+		t.Fatalf("switched to weekly: expected both Thursdays, got %d", got)
+	}
+
+	store.Add(7, "Calisthenics", "Milano Corso Como", int(first.Weekday()), "18:15", once)
+	if err := store.PurgeOnce(once); err != nil { // the day itself: still kept
+		t.Fatal(err)
+	}
+	if _, ok := store.Get(7, rule.ID); !ok {
+		t.Fatal("a one-off rule must survive until its date has passed")
+	}
+	store.PurgeOnce(first.AddDate(0, 0, 1).Format("2006-01-02"))
+	if _, ok := store.Get(7, rule.ID); ok {
+		t.Fatal("a one-off rule must be purged after its date")
 	}
 }

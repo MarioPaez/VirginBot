@@ -526,6 +526,9 @@ func (s *Server) purgePastBookings() {
 	if err := s.store.PurgeSkips(s.today()); err != nil {
 		log.Printf("purge skips: %v", err)
 	}
+	if err := s.store.PurgeOnce(s.today()); err != nil {
+		log.Printf("purge one-off rules: %v", err)
+	}
 }
 
 // unskip clears a cancelled-occurrence mark once the user books or automates it again.
@@ -592,6 +595,7 @@ type bookRequest struct {
 	End       string `json:"end"`
 	Booked    bool   `json:"booked"`
 	Status    string `json:"status"`
+	Once      bool   `json:"once"` // automations: only this occurrence (Date), not every week
 }
 
 func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
@@ -676,10 +680,15 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 	}
 	s.deleteBooking(userID, req.Name, req.Club, req.Date, req.Start)
 	// Keep the (recurring) rule but don't let the engine re-book this date; the FE
-	// tells the user (skipped=true).
+	// tells the user (skipped=true). A one-off rule for this date has nothing
+	// left to do: it goes.
 	skipped := false
 	if wd, ok := weekdayOf(req.Date); ok {
-		if skipped, err = s.store.Skip(userID, req.Name, req.Club, wd, req.Start, req.Date); err != nil {
+		if rule, found := s.store.Find(userID, req.Name, req.Club, wd, req.Start); found && rule.Once == req.Date {
+			if err := s.store.Remove(userID, rule.ID); err != nil {
+				log.Printf("remove one-off rule u%d %s %s: %v", userID, req.Name, req.Date, err)
+			}
+		} else if skipped, err = s.store.Skip(userID, req.Name, req.Club, wd, req.Start, req.Date); err != nil {
 			log.Printf("skip u%d %s %s: %v", userID, req.Name, req.Date, err)
 		}
 	}
@@ -725,7 +734,11 @@ func (s *Server) handleAutomations(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid date", http.StatusBadRequest)
 			return
 		}
-		rule, err := s.store.Add(userID, req.Name, req.Club, wd, req.Start)
+		once := ""
+		if req.Once {
+			once = req.Date
+		}
+		rule, err := s.store.Add(userID, req.Name, req.Club, wd, req.Start, once)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -801,6 +814,9 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 			continue
 		}
 		date := day.Format("2006-01-02")
+		if !r.Covers(date) {
+			continue
+		}
 		start, err := time.ParseInLocation("2006-01-02 15:04", date+" "+r.Start, s.loc)
 		if err != nil || !start.After(now) {
 			continue

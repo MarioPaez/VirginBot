@@ -181,6 +181,9 @@ func (e *Engine) occurrences(now time.Time) []occ {
 				continue
 			}
 			date := day.Format("2006-01-02")
+			if !r.Covers(date) { // one-off rule: only its own week
+				continue
+			}
 			start, err := time.ParseInLocation("2006-01-02 15:04", date+" "+r.Start, e.loc)
 			if err != nil || start.Before(now) {
 				continue

@@ -23,7 +23,13 @@ type Rule struct {
 	OpensDaysBefore int       `json:"opensDaysBefore"`
 	Enabled         bool      `json:"enabled"`
 	Created         time.Time `json:"created"`
+	// Once (YYYY-MM-DD) limits the rule to that single occurrence; "" = every
+	// week. A one-off rule is dropped once its date has passed.
+	Once string `json:"once,omitempty"`
 }
+
+// Covers reports whether the rule applies to the occurrence on date.
+func (r Rule) Covers(date string) bool { return r.Once == "" || r.Once == date }
 
 // WindowDays reports how many days in advance the booking window opens by class
 // type: every class 8 days before, except the solarium (2).
@@ -56,14 +62,14 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-const ruleCols = `user_id, id, name, club, weekday, start, opens_days_before, enabled, created`
+const ruleCols = `user_id, id, name, club, weekday, start, opens_days_before, enabled, created, once_date`
 
 func scanRule(sc interface{ Scan(...any) error }) (Rule, error) {
 	var r Rule
 	var enabled int
 	var created string
 	if err := sc.Scan(&r.UserID, &r.ID, &r.Name, &r.Club, &r.Weekday, &r.Start,
-		&r.OpensDaysBefore, &enabled, &created); err != nil {
+		&r.OpensDaysBefore, &enabled, &created, &r.Once); err != nil {
 		return Rule{}, err
 	}
 	r.Enabled = enabled != 0
@@ -73,11 +79,12 @@ func scanRule(sc interface{ Scan(...any) error }) (Rule, error) {
 
 func (s *Store) insert(r Rule) error {
 	_, err := s.db.Exec(
-		`INSERT INTO automations (user_id, id, name, club, weekday, start, opens_days_before, enabled, created)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(user_id, id) DO UPDATE SET enabled = 1, opens_days_before = excluded.opens_days_before`,
+		`INSERT INTO automations (user_id, id, name, club, weekday, start, opens_days_before, enabled, created, once_date)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id, id) DO UPDATE SET enabled = 1, opens_days_before = excluded.opens_days_before,
+		   once_date = excluded.once_date`,
 		r.UserID, r.ID, r.Name, r.Club, r.Weekday, r.Start, r.OpensDaysBefore, boolToInt(r.Enabled),
-		r.Created.Format(time.RFC3339))
+		r.Created.Format(time.RFC3339), r.Once)
 	return err
 }
 
@@ -116,12 +123,14 @@ func (s *Store) ListAll() []Rule {
 	return out
 }
 
-// Add inserts (or re-enables) a user's rule. Idempotent by logical identity.
-func (s *Store) Add(userID int64, name, club string, weekday int, start string) (Rule, error) {
+// Add inserts (or re-enables) a user's rule. Idempotent by logical identity: a
+// weekly and a one-off rule for the same class are the same rule, the last Add
+// decides which (once = "" makes it weekly, a date makes it one-off).
+func (s *Store) Add(userID int64, name, club string, weekday int, start, once string) (Rule, error) {
 	r := Rule{
 		UserID: userID, ID: ruleKey(name, club, weekday, start), Name: name, Club: club,
 		Weekday: weekday, Start: start, OpensDaysBefore: WindowDays(name),
-		Enabled: true, Created: time.Now(),
+		Enabled: true, Created: time.Now(), Once: once,
 	}
 	if err := s.insert(r); err != nil {
 		return Rule{}, err
@@ -157,6 +166,18 @@ func (s *Store) Remove(userID int64, id string) error {
 func (s *Store) SetEnabled(userID int64, id string, enabled bool) error {
 	_, err := s.db.Exec(`UPDATE automations SET enabled = ? WHERE user_id = ? AND id = ?`,
 		boolToInt(enabled), userID, id)
+	return err
+}
+
+// Find returns the user's rule for a class (any week), if there is one.
+func (s *Store) Find(userID int64, name, club string, weekday int, start string) (Rule, bool) {
+	return s.Get(userID, ruleKey(name, club, weekday, start))
+}
+
+// PurgeOnce deletes the one-off rules whose date is before `before` (YYYY-MM-DD):
+// their only occurrence is over.
+func (s *Store) PurgeOnce(before string) error {
+	_, err := s.db.Exec(`DELETE FROM automations WHERE once_date <> '' AND once_date < ?`, before)
 	return err
 }
 
