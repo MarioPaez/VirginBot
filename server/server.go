@@ -143,8 +143,16 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	days := clampDays(r.URL.Query().Get("days"))
 	now := time.Now().In(s.loc)
 
-	s.fetchBookings(userID) // fresh bookings for the overlay
-	classes, err := s.freshClasses(userID, now, now.AddDate(0, 0, days-1))
+	// Bookings (for the overlay) and the clubs' classes are independent vapi
+	// calls: fetch them concurrently; the overlay runs once both are in.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); s.fetchBookings(userID) }()
+	classes, err := s.downloadClasses(userID, s.clubs, now, now.AddDate(0, 0, days-1))
+	wg.Wait()
+	if err == nil {
+		classes = s.overlayBooked(userID, dedupe(classes))
+	}
 	if errors.Is(err, vapi.ErrBadCredentials) || errors.Is(err, errNoCreds) {
 		// 401 sends the FE back to the login form: the only fix is a new password.
 		w.WriteHeader(http.StatusUnauthorized)
@@ -177,18 +185,31 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"days": out})
 }
 
-// downloadClasses downloads (vapi) and curates (keep filter) the classes of all
-// clubs in the range, WITHOUT deduplicating or marking bookings: each caller
-// decides whether to collapse the Solarium "beds" (web) or keep them all (engine).
-func (s *Server) downloadClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
+// downloadClasses downloads (vapi) and curates (keep filter) the classes of the
+// given clubs in the range, WITHOUT deduplicating or marking bookings: each
+// caller decides whether to collapse the Solarium "beds" (web) or keep them all
+// (engine). One request per club, concurrently (~0.7s each, ~0.5MB: vapi
+// ignores the range and always returns ~10 days).
+func (s *Server) downloadClasses(userID int64, clubs []int, start, end time.Time) ([]calendar.Class, error) {
 	var classes []calendar.Class
 	err := s.auth.Do(userID, func(client *vapi.Client) error {
+		perClub := make([][]calendar.Class, len(clubs))
+		errs := make([]error, len(clubs))
+		var wg sync.WaitGroup
+		for i, clubID := range clubs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				perClub[i], errs[i] = client.Classes(clubID, start, end)
+			}()
+		}
+		wg.Wait()
+		// Joined so auth.Do still sees vapi.ErrUnauthorized and re-logs in.
+		if err := errors.Join(errs...); err != nil {
+			return err
+		}
 		classes = classes[:0]
-		for _, clubID := range s.clubs {
-			cc, err := client.Classes(clubID, start, end)
-			if err != nil {
-				return err
-			}
+		for _, cc := range perClub { // club order kept: deterministic output
 			classes = append(classes, cc...)
 		}
 		return nil
@@ -197,16 +218,6 @@ func (s *Server) downloadClasses(userID int64, start, end time.Time) ([]calendar
 		return nil, err
 	}
 	return s.curate(classes), nil
-}
-
-// freshClasses prepares the calendar for the web: deduplicates (one row per
-// club+class+time) and marks the booked ones (overlay).
-func (s *Server) freshClasses(userID int64, start, end time.Time) ([]calendar.Class, error) {
-	classes, err := s.downloadClasses(userID, start, end)
-	if err != nil {
-		return nil, err
-	}
-	return s.overlayBooked(userID, dedupe(classes)), nil
 }
 
 // dedupe collapses the instances of the same class (same club, name, date and
@@ -257,15 +268,21 @@ func (s *Server) futureOnly(classes []calendar.Class) []calendar.Class {
 	return out
 }
 
-// FreshDayFor fetches a live day for the engine, WITHOUT deduplicating: the
-// engine needs to see ALL the Solarium "beds" (each a distinct bookable class) to
-// try them until one accepts the booking.
-func (s *Server) FreshDayFor(userID int64, date string) ([]calendar.Class, error) {
+// FreshDayFor fetches a live day of ONE club (the rule's / request's) for the
+// engine and for booking, WITHOUT deduplicating: the engine needs to see ALL the
+// Solarium "beds" (each a distinct bookable class) to try them until one accepts
+// the booking. Only that club: this runs right when the window opens, and every
+// extra club is ~0.7s before the POST. Unknown club name → every club.
+func (s *Server) FreshDayFor(userID int64, club, date string) ([]calendar.Class, error) {
 	day, err := time.ParseInLocation("2006-01-02", date, s.loc)
 	if err != nil {
 		return nil, err
 	}
-	classes, err := s.downloadClasses(userID, day, day)
+	clubs := s.clubs
+	if id, ok := calendar.ClubIDByName(club); ok {
+		clubs = []int{id}
+	}
+	classes, err := s.downloadClasses(userID, clubs, day, day)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +444,7 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	// stale (the browser caches the calendar and Virgin reschedules the session →
 	// new sessionId), which causes TOO_EARLY/TOO_LATE_TO_BOOK when booking an
 	// occurrence that's no longer the one for that day.
-	classes, err := s.FreshDayFor(userID, req.Date)
+	classes, err := s.FreshDayFor(userID, req.Club, req.Date)
 	if err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return

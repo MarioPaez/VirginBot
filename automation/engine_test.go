@@ -54,7 +54,7 @@ func TestFiresAtClassHourNotBefore(t *testing.T) {
 	o := sampleOcc(loc)
 
 	var books int
-	fetch := func(int64, string) ([]calendar.Class, error) {
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
 			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
 			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
@@ -91,7 +91,7 @@ func TestFailureEmailAfterLastTrigger(t *testing.T) {
 	o := sampleOcc(loc)
 
 	// The class is never bookable (full) → must notify after the last fire (24h before).
-	fetch := func(int64, string) ([]calendar.Class, error) {
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
 			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
 			Status: "waitlist", ClubID: 209, ClassID: 387071, SessionID: 79403,
@@ -129,7 +129,7 @@ func TestFallbackOnlyForNewRules(t *testing.T) {
 	now := time.Date(2026, 6, 29, 8, 0, 0, 0, loc) // class day, 18:15 still ahead
 
 	var books int
-	fetch := func(int64, string) ([]calendar.Class, error) {
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
 		return []calendar.Class{{
 			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",
 			Status: "bookable", ClubID: 209, ClassID: 387071, SessionID: 79403,
@@ -287,7 +287,7 @@ func TestFinalReconcileConfirmsBooking(t *testing.T) {
 	o := sampleOcc(loc)
 
 	var fetches int
-	fetch := func(int64, string) ([]calendar.Class, error) {
+	fetch := func(int64, string, string) ([]calendar.Class, error) {
 		fetches++
 		c := calendar.Class{
 			Date: "2026-06-29", Name: "Calisthenics", Club: "Milano Corso Como", Start: "18:15",

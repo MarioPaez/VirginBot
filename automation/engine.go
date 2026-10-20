@@ -35,7 +35,7 @@ const (
 // Engine runs the rules of ALL users with precise fires.
 type Engine struct {
 	store    *Store
-	fetchDay func(userID int64, date string) ([]calendar.Class, error) // fresh fetch of a day (authenticated, curated)
+	fetchDay func(userID int64, club, date string) ([]calendar.Class, error) // fresh fetch of a club's day (authenticated, curated)
 	book     func(userID int64, clubID, classID, sessionID int, date string) error
 	notify   func(userID int64, subject, body string)
 	lang     func(userID int64) string // user's language for emails (it/es/en); nil = Default
@@ -60,7 +60,7 @@ type occState struct {
 
 func NewEngine(
 	store *Store,
-	fetchDay func(int64, string) ([]calendar.Class, error),
+	fetchDay func(int64, string, string) ([]calendar.Class, error),
 	book func(int64, int, int, int, string) error,
 	notify func(int64, string, string),
 	lang func(int64) string,
@@ -245,7 +245,7 @@ func (e *Engine) attempt(o occ, st *occState) {
 		time.Sleep(e.lead)
 	}
 	for round := 0; round < e.rounds && !st.booked; round++ {
-		classes, err := e.fetchDay(o.rule.UserID, o.date)
+		classes, err := e.fetchDay(o.rule.UserID, o.rule.Club, o.date)
 		if err != nil {
 			st.lastError = err.Error()
 			log.Printf("automation: %s — round %d/%d: ERROR fetching the calendar: %v", tag, round+1, e.rounds, err)
@@ -308,7 +308,7 @@ func (e *Engine) attempt(o occ, st *occState) {
 	// query once more to confirm before declaring the fire failed (avoids a false
 	// failure email and a retry that would double-book).
 	if !st.booked && st.attempts > 0 {
-		if classes, err := e.fetchDay(o.rule.UserID, o.date); err == nil {
+		if classes, err := e.fetchDay(o.rule.UserID, o.rule.Club, o.date); err == nil {
 			if bookedMatch(findMatches(classes, o.rule, o.date)) != nil {
 				st.booked = true
 				log.Printf("automation: ✓ %s — BOOKED (confirmed in final reconciliation, despite the API error)", tag)

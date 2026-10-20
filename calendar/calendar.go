@@ -3,6 +3,8 @@
 // live here.
 package calendar
 
+import "strings"
+
 // Clubs (numeric vapi clubId).
 const (
 	ClubCorsoComo = 209
@@ -15,6 +17,16 @@ var ClubNames = map[int]string{
 	ClubCorsoComo: "Milano Corso Como",
 	ClubCavour:    "Milano Cavour",
 	ClubPalermo:   "Palermo",
+}
+
+// ClubIDByName is the reverse of ClubNames (case-insensitive).
+func ClubIDByName(name string) (int, bool) {
+	for id, n := range ClubNames {
+		if strings.EqualFold(n, name) {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 // Class is a class scheduled in the calendar.
