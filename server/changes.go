@@ -33,7 +33,11 @@ type movedBooking struct {
 	from, to calendar.Class
 }
 
-func bookingKey(c calendar.Class) string { return c.Name + "|" + c.Club + "|" + c.Date + "|" + c.Start }
+// bookingKey identifies an occurrence among one user's bookings. The club stays
+// out: a user can't hold the same class at the same time in two clubs, and a
+// club's name can change under a stored booking (a club VirginBot only learns
+// once vapi lists them), which isn't news.
+func bookingKey(c calendar.Class) string { return c.Name + "|" + c.Date + "|" + c.Start }
 
 // diffBookings compares the active bookings stored before (old) with the active
 // ones Virgin reports now (cur). Only classes starting after now count: started

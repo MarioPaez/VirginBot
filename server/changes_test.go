@@ -62,6 +62,18 @@ func TestDiffBookingsAmbiguousMove(t *testing.T) {
 	}
 }
 
+// A stored booking whose club only now has a name (VirginBot learnt the club
+// list) is the same booking: no move, no vanish.
+func TestDiffBookingsClubNamed(t *testing.T) {
+	o := calendar.Class{Name: "Yoga Strength", Date: "2026-10-22", Start: "18:30", ClubID: 250, BookingID: 1, Booked: true}
+	c := o
+	c.Club = "Roma Eur"
+	ch := diffBookings(map[string]calendar.Class{bookingKey(o): o}, []calendar.Class{c}, func(calendar.Class) bool { return false })
+	if len(ch.moved)+len(ch.vanished)+len(ch.instructor) != 0 {
+		t.Fatalf("got %+v", ch)
+	}
+}
+
 // A class still in the schedule wasn't dropped by the club (the user cancelled
 // it elsewhere); an "unavailable" one (vapi's unknown status) counts as dropped.
 func TestInSchedule(t *testing.T) {
