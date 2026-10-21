@@ -170,11 +170,13 @@ func main() {
 		})
 		engine.SetOnMissed(srv.OnEngineMissed)
 		engine.SetMemberWindow(acc.WindowMin)
+		engine.SetAway(acc.IsAway)
 		srv.SetEngineForget(engine.Forget)
 		engine.SetBusy(srv.EngineBusy)
 		go engine.Run(make(chan struct{}))
 		go srv.RunWatches()   // books for real too: only where the engine runs
 		go srv.RunReminders() // pushes to real devices: same
+		go srv.RunWeekly()    // same
 		srv.SetEngineHealth(engine.LastCycle)
 		if adminAlert != nil {
 			go automation.Watchdog(engine, adminAlert)

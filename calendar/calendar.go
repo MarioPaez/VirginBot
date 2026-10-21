@@ -3,7 +3,12 @@
 // live here.
 package calendar
 
-import "strings"
+import (
+	"maps"
+	"sort"
+	"strings"
+	"sync"
+)
 
 // Clubs (numeric vapi clubId).
 const (
@@ -12,21 +17,67 @@ const (
 	ClubPalermo   = 231
 )
 
-// ClubNames maps clubId → human-readable name.
-var ClubNames = map[int]string{
+// knownClubs are the clubs VirginBot started with. Their names key stored rows
+// (bookings, rules, history), so the names vapi reports never replace them.
+var knownClubs = map[int]string{
 	ClubCorsoComo: "Milano Corso Como",
 	ClubCavour:    "Milano Cavour",
 	ClubPalermo:   "Palermo",
 }
 
-// ClubIDByName is the reverse of ClubNames (case-insensitive).
+// clubNames maps clubId → human-readable name: the known clubs plus every club
+// vapi lists (AddClubs).
+var (
+	clubsMu   sync.RWMutex
+	clubNames = maps.Clone(knownClubs)
+)
+
+// Club is a club members can pick.
+type Club struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// ClubName returns a club's name ("" if unknown).
+func ClubName(id int) string {
+	clubsMu.RLock()
+	defer clubsMu.RUnlock()
+	return clubNames[id]
+}
+
+// ClubIDByName is the reverse of ClubName (case-insensitive).
 func ClubIDByName(name string) (int, bool) {
-	for id, n := range ClubNames {
+	clubsMu.RLock()
+	defer clubsMu.RUnlock()
+	for id, n := range clubNames {
 		if strings.EqualFold(n, name) {
 			return id, true
 		}
 	}
 	return 0, false
+}
+
+// AddClubs registers the clubs vapi lists, keeping the known clubs' names.
+func AddClubs(clubs []Club) {
+	clubsMu.Lock()
+	defer clubsMu.Unlock()
+	for _, c := range clubs {
+		if _, known := knownClubs[c.ID]; !known && c.ID != 0 && c.Name != "" {
+			clubNames[c.ID] = c.Name
+		}
+	}
+}
+
+// Clubs returns every registered club, by name.
+func Clubs() []Club {
+	clubsMu.RLock()
+	out := make([]Club, 0, len(clubNames))
+	for id, n := range clubNames {
+		out = append(out, Club{ID: id, Name: n})
+	}
+	clubsMu.RUnlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // Class is a class scheduled in the calendar.

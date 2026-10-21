@@ -46,6 +46,7 @@ type Engine struct {
 	push         func(userID int64, title, body, url string) // booking outcomes on the user's devices (SetPush); nil = silent
 	lang         func(userID int64) string                   // user's language for notifications (it/es/en); nil = Default
 	memberWindow func(userID int64) int                      // member's booking window in minutes (0 = unknown); nil = class windows only
+	away         func(userID int64, date string) bool        // the user is on holiday that day: nothing is booked; nil = never
 	loc          *time.Location
 	rounds       int           // attempts per fire
 	lead         time.Duration // lead after the hour before the 1st attempt
@@ -118,6 +119,10 @@ func (e *Engine) SetPush(fn func(userID int64, title, body, url string)) { e.pus
 // SetMemberWindow sets where the engine reads each member's booking window, so
 // it doesn't fire before the window opens for members without priority booking.
 func (e *Engine) SetMemberWindow(fn func(userID int64) int) { e.memberWindow = fn }
+
+// SetAway sets where the engine reads each user's holidays: their occurrences
+// on those days get no attempts (and no "couldn't book" notice).
+func (e *Engine) SetAway(fn func(userID int64, date string) bool) { e.away = fn }
 
 // SetBusy sets how the engine finds a clashing booking of the user.
 func (e *Engine) SetBusy(fn func(userID int64, r Rule, date string) (string, bool)) { e.busy = fn }
@@ -253,6 +258,9 @@ func (e *Engine) occurrences(now time.Time) []occ {
 				continue
 			}
 			if e.store.Skipped(r.UserID, r.ID, date) { // cancelled by the user: don't re-book
+				continue
+			}
+			if e.away != nil && e.away(r.UserID, date) {
 				continue
 			}
 			out = append(out, o)

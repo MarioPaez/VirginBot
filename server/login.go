@@ -302,7 +302,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 		email = s.auth.Email(userID)
 		lang = s.accounts.Lang(userID)
-		homeClub = calendar.ClubNames[s.accounts.HomeClub(userID)] // "" if unknown or not one we show
+		homeClub = calendar.ClubName(s.accounts.HomeClub(userID)) // "" if unknown
 	}
 	writeJSON(w, map[string]any{
 		"loggedIn":   ok,

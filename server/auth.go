@@ -11,7 +11,8 @@ import (
 	"github.com/MarioPaez/VirginBot/vapi"
 )
 
-// authTTL: the vapi token lasts ~2h; we refresh it (re-login) before then.
+// authTTL: the vapi token lasts ~2h; we renew it before then (with the refresh
+// token, or a login once that's gone).
 const authTTL = 100 * time.Minute
 
 // clientAlertEvery throttles the "app credentials rejected" alert: the engine hits
@@ -105,15 +106,43 @@ func (a *Auth) Login(email, pass string) (int64, error) {
 		return 0, fmt.Errorf("%w: %v", errSaveAccount, err)
 	}
 	a.mu.Lock()
-	a.clients[userID] = &authEntry{client: client, expiry: time.Now().Add(authTTL)}
+	a.keep(userID, client)
 	delete(a.rejected, userID) // fresh, valid password
 	a.mu.Unlock()
 	a.store.ClearCredsAlert(userID)
 	return userID, nil
 }
 
-// ClientFor returns an authenticated vapi client for the user, re-logging in with
-// the stored credentials if needed.
+// keep caches the user's client and stores its refresh token. Called with a.mu held.
+func (a *Auth) keep(userID int64, c *vapi.Client) {
+	a.clients[userID] = &authEntry{client: c, expiry: time.Now().Add(authTTL)}
+	if err := a.store.SetRefreshToken(userID, c.RefreshToken()); err != nil {
+		log.Printf("auth: u%d: storing the refresh token: %v", userID, err)
+	}
+}
+
+// resume renews the user's session from the stored refresh token, without the
+// password. Called with a.mu held.
+func (a *Auth) resume(userID int64) (*vapi.Client, bool) {
+	rt := a.store.RefreshToken(userID)
+	if rt == "" {
+		return nil, false
+	}
+	c, err := vapi.Resume(a.apiKey, rt)
+	if err != nil {
+		log.Printf("auth: u%d: %v; logging in with the password", userID, err)
+		a.store.SetRefreshToken(userID, "") // dead: don't try it again
+		return nil, false
+	}
+	log.Printf("auth: u%d: session renewed with the refresh token", userID)
+	a.keep(userID, c)
+	return c, true
+}
+
+// ClientFor returns an authenticated vapi client for the user, renewing the
+// session if needed: with the refresh token first (no password, so no login
+// that counts toward Virgin's rate limit), else re-logging in with the stored
+// credentials.
 func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -122,6 +151,9 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 	}
 	if a.rejected[userID] {
 		return nil, errCredsRejected
+	}
+	if c, ok := a.resume(userID); ok {
+		return c, nil
 	}
 	email, pass, ok := a.store.Get(userID)
 	if !ok {
@@ -139,19 +171,24 @@ func (a *Auth) ClientFor(userID int64) (*vapi.Client, error) {
 	if err != nil {
 		return nil, a.observe(err)
 	}
-	a.clients[userID] = &authEntry{client: c, expiry: time.Now().Add(authTTL)}
+	a.keep(userID, c)
 	return c, nil
 }
 
 func (a *Auth) Email(userID int64) string { return a.store.Email(userID) }
 
-// Invalidate drops the user's cached client, forcing a re-login on the next call.
-// Used when vapi returns 401 (token invalidated out of band, e.g. after signing
-// in on the phone) before authTTL expires.
+// Invalidate drops the user's cached session, forcing a login on the next call.
+// Used when vapi returns 401 (token invalidated out of band) before authTTL
+// expires.
 func (a *Auth) Invalidate(userID int64) {
 	a.mu.Lock()
 	delete(a.clients, userID)
 	a.mu.Unlock()
+	// A session that just got a 401 may have been revoked with its refresh
+	// token: the retry logs in with the password, which always recovers.
+	if err := a.store.SetRefreshToken(userID, ""); err != nil {
+		log.Printf("auth: u%d: clearing the refresh token: %v", userID, err)
+	}
 }
 
 // Do runs fn with the user's authenticated client and, if vapi returns 401, drops

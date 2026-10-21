@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MarioPaez/VirginBot/account"
@@ -51,6 +52,10 @@ type Server struct {
 
 	engineCycle  func() time.Time                        // engine's last completed cycle (admin health); nil = engine off
 	engineForget func(userID int64, ruleID, date string) // drops the engine's state of an occurrence; nil = engine off
+
+	clubsMu     sync.Mutex  // one vapi club listing at a time
+	clubsLoaded atomic.Bool // every club vapi lists is registered (calendar.AddClubs)
+	clubsTried  time.Time   // last failed listing (guarded by clubsMu): retried every clubsRetry
 
 	mu      sync.Mutex
 	fetchIn map[string]bool // booking reconciliations in progress, key "bookings|userID"
@@ -190,6 +195,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/automations", s.requireSession(s.handleAutomations))
 	mux.HandleFunc("/api/watches", s.requireSession(s.handleWatches))
 	mux.HandleFunc("/api/settings", s.requireSession(s.handleSettings))
+	mux.HandleFunc("/api/away", s.requireSession(s.handleAway))
+	mux.HandleFunc("/api/clubs", s.requireSession(s.handleClubs))
 	mux.HandleFunc("/api/calfeed", s.requireSession(s.handleCalFeed))
 	mux.HandleFunc("/api/stats", s.requireSession(s.handleStats))
 	mux.HandleFunc("/api/history/attended", s.requireSession(s.handleAttended))
@@ -204,6 +211,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/admin/automations", s.requireAdmin(s.handleAdminAutomations))
 	mux.HandleFunc("/api/admin/bookings", s.requireAdmin(s.handleAdminBookings))
 	mux.HandleFunc("/api/admin/attempts", s.requireAdmin(s.handleAdminAttempts))
+	mux.HandleFunc("/api/admin/backup", s.requireAdmin(s.handleAdminBackup))
 	// Not in Go's built-in MIME table; browsers want the proper type for the manifest.
 	mime.AddExtensionType(".webmanifest", "application/manifest+json")
 	static, _ := fs.Sub(webFS, "web")
@@ -243,7 +251,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); s.fetchBookings(userID) }()
-	classes, err := s.downloadClasses(userID, s.clubs, now, now.AddDate(0, 0, days-1))
+	classes, err := s.downloadClasses(userID, s.clubsFor(userID), now, now.AddDate(0, 0, days-1))
 	wg.Wait()
 	if err == nil {
 		classes = s.overlayBooked(userID, dedupe(classes))
@@ -290,6 +298,7 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 // (engine). One request per club, concurrently (~0.7s each, ~0.5MB: vapi
 // ignores the range and always returns ~10 days).
 func (s *Server) downloadClasses(userID int64, clubs []int, start, end time.Time) ([]calendar.Class, error) {
+	s.ensureClubs(userID) // classes carry their club's name
 	var classes []calendar.Class
 	err := s.auth.Do(userID, func(client *vapi.Client) error {
 		perClub := make([][]calendar.Class, len(clubs))
@@ -316,7 +325,7 @@ func (s *Server) downloadClasses(userID int64, clubs []int, start, end time.Time
 	if err != nil {
 		return nil, err
 	}
-	return s.curate(classes), nil
+	return s.curate(userID, classes), nil
 }
 
 // dedupe collapses the instances of the same class (same club, name, date and
@@ -403,7 +412,8 @@ func (s *Server) FreshDayFor(userID int64, club, date string) ([]calendar.Class,
 	if err != nil {
 		return nil, err
 	}
-	clubs := s.clubs
+	s.ensureClubs(userID) // resolves the rule's club by name
+	clubs := s.clubsFor(userID)
 	if id, ok := calendar.ClubIDByName(club); ok {
 		clubs = []int{id}
 	}
@@ -447,6 +457,7 @@ func (s *Server) triggerBookings(userID int64) {
 
 // fetchBookings reconciles the user's bookings table with vapi (one call).
 func (s *Server) fetchBookings(userID int64) {
+	s.ensureClubs(userID) // bookings carry their club's name
 	now := time.Now().In(s.loc)
 	end := now.AddDate(0, 0, defaultDays)
 	var booked []calendar.Class
@@ -475,20 +486,32 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 	// What the user had: waitlist places (if one is now an active booking, they
 	// got in) and active bookings (any other active one is new: friends who
 	// usually go are told). Read through the tx (the pool has a single connection).
-	wasWaitlisted, wasBooked := map[string]bool{}, map[string]bool{}
-	if rows, err := tx.Query(`SELECT name, club, date, start, status FROM bookings
+	wasWaitlisted, wasBooked := map[string]bool{}, map[string]calendar.Class{}
+	if rows, err := tx.Query(`SELECT name, club, date, start, end_time, instructor, club_id, booking_id, status FROM bookings
 		 WHERE user_id = ? AND date >= ? AND date <= ?`, userID, start, end); err == nil {
 		for rows.Next() {
-			var n, c, d, st, status string
-			if rows.Scan(&n, &c, &d, &st, &status) == nil {
+			var c calendar.Class
+			var status string
+			if rows.Scan(&c.Name, &c.Club, &c.Date, &c.Start, &c.End, &c.Instructor, &c.ClubID, &c.BookingID, &status) == nil {
 				if status == "waitlisted" {
-					wasWaitlisted[n+"|"+c+"|"+d+"|"+st] = true
+					wasWaitlisted[bookingKey(c)] = true
 				} else {
-					wasBooked[n+"|"+c+"|"+d+"|"+st] = true
+					c.Booked = true
+					wasBooked[bookingKey(c)] = c
 				}
 			}
 		}
 		rows.Close()
+	}
+	// What Virgin changed on its own (club cancellations, new times, instructor
+	// swaps), told once the new rows are in.
+	changes := diffBookings(wasBooked, booked, func(c calendar.Class) bool {
+		at, ok := s.startOf(c.Date, c.Start)
+		return !ok || !at.After(time.Now())
+	})
+	moved := map[string]bool{}
+	for _, m := range changes.moved {
+		moved[bookingKey(m.to)] = true
 	}
 	// What's new is only news if we knew the user's bookings before: something
 	// stored, or an earlier sync since start (a first sync isn't news).
@@ -514,12 +537,12 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 	now := time.Now().Format(time.RFC3339)
 	for _, c := range booked {
 		status := "booked"
-		k := c.Name + "|" + c.Club + "|" + c.Date + "|" + c.Start
+		k := bookingKey(c)
 		if c.Waitlisted {
 			status = "waitlisted"
 		} else if wasWaitlisted[k] {
 			promoted = append(promoted, c)
-		} else if !wasBooked[k] && known > 0 {
+		} else if _, had := wasBooked[k]; !had && !moved[k] && known > 0 {
 			fresh = append(fresh, c)
 		}
 		// An active booking wins over a waitlist place for the same occurrence.
@@ -550,6 +573,9 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 				s.notifyFriends(userID, c)
 			}
 		}()
+	}
+	if len(changes.instructor)+len(changes.moved)+len(changes.vanished) > 0 {
+		go s.notifyChanges(userID, changes) // a vanished one costs a vapi call to tell who dropped it
 	}
 	return promoted
 }
@@ -909,7 +935,7 @@ func (s *Server) nextAttempt(userID int64, r automation.Rule) (occDate string, a
 		if err != nil || !start.After(now) {
 			continue
 		}
-		if s.isBooked(userID, r.Name, r.Club, date, r.Start) || s.store.Skipped(userID, r.ID, date) {
+		if s.isBooked(userID, r.Name, r.Club, date, r.Start) || s.store.Skipped(userID, r.ID, date) || s.accounts.IsAway(userID, date) {
 			continue
 		}
 		// An occurrence with no fire left (inside its last 24h) gets no more
@@ -930,8 +956,11 @@ func (s *Server) langOf(userID int64) i18n.Lang {
 	return i18n.Coerce(s.accounts.Lang(userID))
 }
 
-func (s *Server) curate(classes []calendar.Class) []calendar.Class {
-	if s.keep == nil {
+// curate keeps the classes the user wants to see: the popular ones (keep), or
+// all of them if they chose so. The engine goes through here too, so a rule
+// on any class finds it.
+func (s *Server) curate(userID int64, classes []calendar.Class) []calendar.Class {
+	if s.keep == nil || s.accounts.AllClasses(userID) {
 		return classes
 	}
 	out := make([]calendar.Class, 0, len(classes))

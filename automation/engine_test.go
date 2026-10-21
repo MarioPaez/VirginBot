@@ -427,3 +427,35 @@ func TestOnceRuleOnlyItsDate(t *testing.T) {
 		t.Fatal("a one-off rule must be purged after its date")
 	}
 }
+
+// On holiday nothing is scheduled; the rule resumes on the first day after.
+func TestAwayNotScheduled(t *testing.T) {
+	loc := mustLoc(t)
+	dbh, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("open DB: %v", err)
+	}
+	defer dbh.Close()
+	store := NewStore(dbh)
+
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, loc)
+	day := now.AddDate(0, 0, 1)
+	rule, err := store.Add(7, "Calisthenics", "Milano Corso Como", int(day.Weekday()), "18:15", "", "")
+	if err != nil {
+		t.Fatalf("add rule: %v", err)
+	}
+	e := NewEngine(store, nil, nil, nil)
+	e.loc = loc
+	away := day.Format("2006-01-02")
+	e.SetAway(func(userID int64, date string) bool { return userID == 7 && date == away })
+
+	var dates []string
+	for _, o := range e.occurrences(now) {
+		if o.rule.ID == rule.ID {
+			dates = append(dates, o.date)
+		}
+	}
+	if len(dates) != 1 || dates[0] != day.AddDate(0, 0, 7).Format("2006-01-02") {
+		t.Fatalf("scheduled %v: the holiday must be skipped, the next week kept", dates)
+	}
+}

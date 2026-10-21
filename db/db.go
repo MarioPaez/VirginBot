@@ -26,7 +26,14 @@ CREATE TABLE IF NOT EXISTS users (
     full_action    TEXT NOT NULL DEFAULT '',    -- automated class still full at its last attempt: '' | 'waitlist' | 'watch'
     window_min     INTEGER NOT NULL DEFAULT 0,  -- how long before a class the member can book it, minutes (0 = unknown)
     friend_notify  INTEGER NOT NULL DEFAULT 1,  -- push when a friend books one of my usual classes
-    creds_alert    TEXT NOT NULL DEFAULT ''     -- last "your Virgin password stopped working" push (RFC 3339)
+    creds_alert    TEXT NOT NULL DEFAULT '',    -- last "your Virgin password stopped working" push (RFC 3339)
+    weekly_summary INTEGER NOT NULL DEFAULT 1,  -- Sunday evening push with next week's classes
+    weekly_sent    TEXT NOT NULL DEFAULT '',    -- YYYY-MM-DD of the Sunday the last summary went out
+    refresh        BLOB,                        -- vapi refresh token, encrypted like pass (NULL = none)
+    away_from      TEXT NOT NULL DEFAULT '',    -- holidays: no automated bookings from this date...
+    away_until     TEXT NOT NULL DEFAULT '',    -- ...to this one, both included (YYYY-MM-DD; '' = none)
+    clubs          TEXT NOT NULL DEFAULT '',    -- vapi clubIds the member follows, comma-separated ('' = the home club)
+    all_classes    INTEGER NOT NULL DEFAULT 0   -- 1 = every class of those clubs, 0 = the popular ones
 );
 CREATE TABLE IF NOT EXISTS automations (
     user_id           INTEGER NOT NULL,
@@ -230,8 +237,26 @@ func migrate(d *sql.DB) error {
 		{"window_min", "INTEGER NOT NULL DEFAULT 0"},
 		{"friend_notify", "INTEGER NOT NULL DEFAULT 1"},
 		{"creds_alert", "TEXT NOT NULL DEFAULT ''"},
+		{"weekly_summary", "INTEGER NOT NULL DEFAULT 1"},
+		{"weekly_sent", "TEXT NOT NULL DEFAULT ''"},
+		{"refresh", "BLOB"},
+		{"away_from", "TEXT NOT NULL DEFAULT ''"},
+		{"away_until", "TEXT NOT NULL DEFAULT ''"},
+		{"all_classes", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureColumn(d, "users", c[0], c[1]); err != nil {
+			return err
+		}
+	}
+	// Clubs became a per-member choice; members from before keep the three clubs
+	// everyone saw until then (209 Corso Como, 224 Cavour, 231 Palermo).
+	if has, err := hasColumn(d, "users", "clubs"); err != nil {
+		return err
+	} else if !has {
+		if err := ensureColumn(d, "users", "clubs", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		if _, err := d.Exec(`UPDATE users SET clubs = '209,224,231'`); err != nil {
 			return err
 		}
 	}

@@ -99,6 +99,7 @@
   .irow .box { flex:none; width:20px; height:20px; border-radius:6px; border:2px solid var(--line-2); display:grid; place-items:center; }
   .irow .box svg.i { width:14px; height:14px; stroke-width:3; opacity:0; }
   .irow.on .box { background:var(--text); border-color:var(--text); color:var(--bg); }
+  .irow .tag { flex:none; font-size:12px; color:var(--muted); }
   .irow.on .box svg.i { opacity:1; }
 
   /* ---- Content ---- */
@@ -273,6 +274,13 @@
   .pushbox .on svg.i { width:16px; height:16px; stroke-width:2.6; }
   .pushbox .row { display:flex; gap:8px; }
   .pushbox .row .btn { flex:1; }
+  .dates { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .dates .field input { height:44px; width:100%; min-width:0; }
+  .pushbox ul { margin:0; padding-left:18px; color:var(--muted); font-size:13.5px; line-height:1.5; }
+  .awaybar { display:flex; align-items:center; gap:10px; margin:0 0 12px; padding:12px 14px; border-radius:14px;
+             background:var(--surface-2); color:var(--muted); font-size:13.5px; line-height:1.45; }
+  .awaybar .i { flex:none; color:var(--text); }
+  .awaybar b { color:var(--text); }
   .choices { display:grid; gap:10px; margin-top:14px; }
   .choice { display:flex; align-items:center; gap:14px; width:100%; padding:14px; border-radius:14px; text-align:left;
             border:1px solid var(--line-2); background:var(--surface-2); cursor:pointer; }
@@ -307,6 +315,11 @@
            font-size:14px; line-height:1.45; box-shadow:0 8px 30px rgba(0,0,0,.45); }
   #toast.show { opacity:1; transform:translate(-50%, 0); }
   #toast.err { background:#3b1414; color:#fecaca; }
+  #toast.act { pointer-events:auto; display:flex; align-items:center; gap:16px; }
+  #toast .tact { background:none; border:none; padding:6px 2px; margin:-6px 0; color:var(--text); font:inherit; font-weight:700; cursor:pointer; white-space:nowrap; }
+  /* The calendar kept on the device, shown while the live one loads: read only. */
+  #out.stale::before { content:attr(data-stale); display:block; text-align:center; color:var(--muted); font-size:12px; padding:2px 0 8px; }
+  #out.stale button { pointer-events:none; opacity:.5; }
   @media (min-width:720px) { #toast { bottom:100px; } }
 
   /* ---- Login ---- */
@@ -350,7 +363,7 @@
   <div class="top">
     <img src="/logo.svg" class="logo" alt="">
     <h1 class="brand">Virgin<span>Bot</span></h1>
-    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush(); loadSettings(); loadCalFeed()" data-i18n-title="menu.account"></button>
+    <button class="avatar" id="avatar" onclick="openSheet('acctSheet'); renderPush(); loadSettings(); loadCalFeed(); loadAway().then(renderAway); loadClubs()" data-i18n-title="menu.account"></button>
   </div>
   <div class="toolbar" id="controls">
     <div class="toolrow">
@@ -387,8 +400,12 @@
     <div style="min-width:0"><div class="em" id="user"></div><div class="st" data-i18n="header.session">Signed in</div></div></div>
   <div class="sec" id="pushSec" style="display:none"><p class="sec-t" data-i18n="menu.notifications">Notifications</p><div class="pushbox" id="pushBox"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.cal">Phone calendar</p><div class="pushbox" id="calBox"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.clubs">Your clubs</p><div class="chips" id="myClubChips"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.classes">Classes</p><div class="opts" id="classOpts"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.reminder">Reminder before each class</p><div class="chips" id="reminderChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.friends">Friends</p><div id="friendBox"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.weekly">Weekly summary</p><div id="weeklyBox"></div></div>
+  <div class="sec"><p class="sec-t" data-i18n="set.away">Holidays</p><div class="pushbox" id="awayBox"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="set.full">If an automation doesn't get a spot</p>
     <p class="sec-hint lead" data-i18n="set.full.hint"></p><div class="opts" id="fullChips"></div></div>
   <div class="sec"><p class="sec-t" data-i18n="menu.language">Language</p><div class="seg langseg"></div></div>
@@ -401,6 +418,14 @@
   <input class="search" id="instrSearch" type="search" autocomplete="off" data-i18n-ph="instr.search" oninput="renderInstrList()">
   <p class="sec-hint" data-i18n="fav.hint">Tap the star to mark your favourite instructors.</p>
   <div class="ilist" id="instrList"></div>
+</div>
+
+<div class="sheet tall" id="clubSheet" role="dialog" aria-modal="true">
+  <div class="grab"></div>
+  <h2><span data-i18n="set.clubs">Your clubs</span><button class="linkbtn" onclick="closeSheet('clubSheet')" data-i18n="action.done">Done</button></h2>
+  <input class="search" id="clubSearch" type="search" autocomplete="off" data-i18n-ph="clubs.search" oninput="renderClubList()">
+  <p class="sec-hint" id="clubHint"></p>
+  <div class="ilist" id="clubList"></div>
 </div>
 
 <div class="sheet" id="cancelSheet" role="dialog" aria-modal="true" aria-labelledby="cancelTitle">
@@ -524,7 +549,7 @@ const I18N = {
     "filter.instructor": "Istruttore", "filter.favs": "Preferiti", "fav.hint": "Tocca la stella per segnare i tuoi istruttori preferiti.", "fav.on": "Preferito", "fav.off": "Segna come preferito",
     "toast.oncetaken": "Questa lezione è già automatizzata solo per il %s. Scegli «Ogni settimana» per coprire entrambe.",
     "set.full.hint": "Provo ogni giorno all'ora della lezione fino a 24 h prima. Se a quel punto è ancora piena:", "set.full.notify.sub": "Ti mando una notifica, nient'altro.", "set.full.waitlist.sub": "Se la lezione ha la lista d'attesa ti iscrivo: entri se qualcuno annulla.", "set.full.watch.sub": "La controllo ogni pochi minuti e la prenoto se si libera un posto, fino a %d h prima.", "instr.choose": "Scegli…", "instr.search": "Cerca istruttore", "instr.none": "Nessun istruttore trovato.", "action.done": "Fatto",
-    "row.cancelby": "Annullabile fino alle %s", "row.nocancel": "Fuori tempo per annullare", "toast.overlapauto": "Non creata: si sovrappone alla tua automazione di %s · %s (%s).", "toast.overlapbook": "Si sovrappone alla tua prenotazione di %s alle %s.", "set.friends": "Amici", "set.friends.label": "Avvisami quando un amico prenota una mia lezione abituale", "set.friends.sub": "Stessa lezione e stesso club, stesso giorno e ora.", "att.title": "Ci sei andato?", "att.sub": "Le statistiche contano solo le lezioni a cui vai.", "att.yes": "Sì", "att.no": "No", "noshow.warn": "Hai saltato %d lezioni negli ultimi 30 giorni senza annullarle. Alla terza Virgin può bloccarti le prenotazioni per 15 giorni: annulla entro %d h prima.", "stats.title": "La tua attività", "stats.months": "Lezioni al mese", "stats.bytype": "Per tipo", "stats.slot": "La tua lezione: <b>%s</b> · %s %s", "suggest.text": "Vai spesso a <b>%s</b> · %s il %s alle %s (%d volte).", "suggest.auto": "Automatizza", "suggest.dismiss": "Non ora", "outcome.overlap": "Sovrapposta",
+    "row.cancelby": "Annullabile fino alle %s", "row.nocancel": "Fuori tempo per annullare", "toast.overlapauto": "Non creata: si sovrappone alla tua automazione di %s · %s (%s).", "toast.overlapbook": "Si sovrappone alla tua prenotazione di %s alle %s.", "set.friends": "Amici", "set.friends.label": "Avvisami quando un amico prenota una mia lezione abituale", "set.friends.sub": "Stessa lezione e stesso club, stesso giorno e ora.", "att.title": "Ci sei andato?", "att.sub": "Le statistiche contano solo le lezioni a cui vai.", "att.yes": "Sì", "att.no": "No", "noshow.warn": "Hai saltato %d lezioni negli ultimi 30 giorni senza annullarle. Alla terza Virgin può bloccarti le prenotazioni per 15 giorni: annulla entro %d h prima.", "stats.title": "La tua attività", "stats.months": "Lezioni al mese", "stats.bytype": "Per tipo", "stats.slot": "La tua lezione: <b>%s</b> · %s %s", "suggest.text": "Vai spesso a <b>%s</b> · %s il %s alle %s (%d volte).", "suggest.auto": "Automatizza", "suggest.dismiss": "Non ora", "outcome.overlap": "Sovrapposta", "set.clubs": "I tuoi club", "clubs.add": "Aggiungi club…", "clubs.search": "Cerca club", "clubs.hint": "Fino a %d club: il calendario mostra le loro lezioni.", "clubs.home": "Il tuo club", "clubs.max": "Al massimo %d club", "clubs.last": "Ti serve almeno un club", "set.classes": "Lezioni", "set.classes.popular": "Le più richieste", "set.classes.popular.sub": "Calisthenics, Pilates, Reformer, TRX, Cycle, Full Body, Lift e Solarium.", "set.classes.all": "Tutte", "set.classes.all.sub": "Tutte le lezioni dei tuoi club: filtra per tipo nel calendario.", "set.away": "Vacanze", "away.hint": "Nei giorni che scegli non prenoto niente: le automazioni restano e ripartono dopo.", "away.from": "Dal", "away.until": "Al", "away.save": "Salva le vacanze", "away.on": "In vacanza dal <b>%s</b> al <b>%s</b>: in quei giorni non prenoto niente.", "away.change": "Cambia date", "away.clear": "Togli", "away.booked": "Hai già queste prenotazioni in quei giorni: annullale se non ci vai.", "toast.awayset": "Vacanze salvate ✓", "toast.awaycleared": "Vacanze tolte: riprendo a prenotare", "set.weekly": "Riepilogo settimanale", "set.weekly.label": "La domenica sera, le lezioni della settimana dopo", "set.weekly.sub": "Prenotate, in lista d'attesa e automazioni ancora senza posto.", "toast.cancelling": "Annullo %s…", "toast.leaving": "Esco dalla lista d'attesa di %s…", "action.undo": "Annulla", "toast.undone": "Fatto: non l'ho annullata", "cal.updating": "Aggiorno il calendario…", "admin.backup": "Scarica copia del database", "admin.backup.hint": "Contiene le sessioni e le password cifrate: conservala in un posto sicuro.",
     "cancel.title": "Annullare questa lezione?", "cancel.text": "Liberi il posto per qualcun altro e non conta come assenza. Puoi annullare fino alle %s.", "cancel.late": "Il termine per annullare è scaduto alle %s: Virgin potrebbe rifiutarla o contarla come assenza.", "cancel.yes": "Sì, annulla", "cancel.no": "No, ci vado", "cancel.gone": "Quella prenotazione non c'è più.",
     "rel.today": "oggi", "rel.tomorrow": "domani", "duration": "%d min",
   },
@@ -569,7 +594,7 @@ const I18N = {
     "filter.instructor": "Instructor", "filter.favs": "Favoritos", "fav.hint": "Toca la estrella para marcar a tus instructores favoritos.", "fav.on": "Favorito", "fav.off": "Marcar como favorito",
     "toast.oncetaken": "Esta clase ya está automatizada solo para el %s. Elige «Cada semana» para cubrir ambas.",
     "set.full.hint": "Lo intento cada día a la hora de la clase hasta 24 h antes. Si para entonces sigue llena:", "set.full.notify.sub": "Te mando una notificación y nada más.", "set.full.waitlist.sub": "Si la clase tiene lista de espera te apunto: entras si alguien cancela.", "set.full.watch.sub": "La reviso cada pocos minutos y la reservo si se libera una plaza, hasta %d h antes.", "instr.choose": "Elegir…", "instr.search": "Buscar instructor", "instr.none": "Ningún instructor encontrado.", "action.done": "Hecho",
-    "row.cancelby": "Cancelable hasta las %s", "row.nocancel": "Fuera de plazo para cancelar", "toast.overlapauto": "No creada: se solapa con tu automatización de %s · %s (%s).", "toast.overlapbook": "Se solapa con tu reserva de %s a las %s.", "set.friends": "Amigos", "set.friends.label": "Avisarme cuando un amigo reserve una de mis clases habituales", "set.friends.sub": "Misma clase y mismo gimnasio, mismo día y hora.", "att.title": "¿Fuiste?", "att.sub": "Las estadísticas solo cuentan las clases a las que vas.", "att.yes": "Sí", "att.no": "No", "noshow.warn": "Has faltado a %d clases en los últimos 30 días sin cancelarlas. A la tercera Virgin puede bloquearte las reservas 15 días: cancela hasta %d h antes.", "stats.title": "Tu actividad", "stats.months": "Clases por mes", "stats.bytype": "Por tipo", "stats.slot": "Tu clase: <b>%s</b> · %s %s", "suggest.text": "Vas mucho a <b>%s</b> · %s los %s a las %s (%d veces).", "suggest.auto": "Automatizar", "suggest.dismiss": "Ahora no", "outcome.overlap": "Solapada",
+    "row.cancelby": "Cancelable hasta las %s", "row.nocancel": "Fuera de plazo para cancelar", "toast.overlapauto": "No creada: se solapa con tu automatización de %s · %s (%s).", "toast.overlapbook": "Se solapa con tu reserva de %s a las %s.", "set.friends": "Amigos", "set.friends.label": "Avisarme cuando un amigo reserve una de mis clases habituales", "set.friends.sub": "Misma clase y mismo gimnasio, mismo día y hora.", "att.title": "¿Fuiste?", "att.sub": "Las estadísticas solo cuentan las clases a las que vas.", "att.yes": "Sí", "att.no": "No", "noshow.warn": "Has faltado a %d clases en los últimos 30 días sin cancelarlas. A la tercera Virgin puede bloquearte las reservas 15 días: cancela hasta %d h antes.", "stats.title": "Tu actividad", "stats.months": "Clases por mes", "stats.bytype": "Por tipo", "stats.slot": "Tu clase: <b>%s</b> · %s %s", "suggest.text": "Vas mucho a <b>%s</b> · %s los %s a las %s (%d veces).", "suggest.auto": "Automatizar", "suggest.dismiss": "Ahora no", "outcome.overlap": "Solapada", "set.clubs": "Tus clubes", "clubs.add": "Añadir club…", "clubs.search": "Buscar club", "clubs.hint": "Hasta %d clubes: el calendario muestra sus clases.", "clubs.home": "Tu club", "clubs.max": "Como mucho %d clubes", "clubs.last": "Necesitas al menos un club", "set.classes": "Clases", "set.classes.popular": "Las más populares", "set.classes.popular.sub": "Calisthenics, Pilates, Reformer, TRX, Cycle, Full Body, Lift y Solarium.", "set.classes.all": "Todas", "set.classes.all.sub": "Todas las clases de tus clubes: filtra por tipo en el calendario.", "set.away": "Vacaciones", "away.hint": "En los días que elijas no reservo nada: las automatizaciones se quedan y vuelven después.", "away.from": "Desde", "away.until": "Hasta", "away.save": "Guardar vacaciones", "away.on": "De vacaciones del <b>%s</b> al <b>%s</b>: en esos días no reservo nada.", "away.change": "Cambiar fechas", "away.clear": "Quitar", "away.booked": "Ya tienes estas reservas en esos días: cancélalas si no vas a ir.", "toast.awayset": "Vacaciones guardadas ✓", "toast.awaycleared": "Vacaciones quitadas: vuelvo a reservar", "set.weekly": "Resumen semanal", "set.weekly.label": "El domingo por la tarde, las clases de la semana siguiente", "set.weekly.sub": "Reservadas, en lista de espera y automatizaciones aún sin plaza.", "toast.cancelling": "Cancelando %s…", "toast.leaving": "Saliendo de la lista de espera de %s…", "action.undo": "Deshacer", "toast.undone": "Hecho: no la he cancelado", "cal.updating": "Actualizando el calendario…", "admin.backup": "Descargar copia de la base de datos", "admin.backup.hint": "Contiene las sesiones y las contraseñas cifradas: guárdala en un sitio seguro.",
     "cancel.title": "¿Cancelar esta clase?", "cancel.text": "Liberas la plaza para otra persona y no cuenta como falta. Puedes cancelar hasta las %s.", "cancel.late": "El plazo para cancelar terminó a las %s: Virgin puede rechazarla o contarla como falta.", "cancel.yes": "Sí, cancelar", "cancel.no": "No, voy a ir", "cancel.gone": "Esa reserva ya no está en tus reservas.",
     "rel.today": "hoy", "rel.tomorrow": "mañana", "duration": "%d min",
   },
@@ -614,7 +639,7 @@ const I18N = {
     "filter.instructor": "Instructor", "filter.favs": "Favourites", "fav.hint": "Tap the star to mark your favourite instructors.", "fav.on": "Favourite", "fav.off": "Mark as favourite",
     "toast.oncetaken": "This class is already automated just for %s. Pick “Every week” to cover both.",
     "set.full.hint": "I try every day at class time until 24 h before. If it's still full by then:", "set.full.notify.sub": "I send you a notification, nothing else.", "set.full.waitlist.sub": "If the class has a waitlist I join it: you're in if someone cancels.", "set.full.watch.sub": "I check it every few minutes and book it if a spot frees up, until %d h before.", "instr.choose": "Choose…", "instr.search": "Search instructor", "instr.none": "No instructor found.", "action.done": "Done",
-    "row.cancelby": "Cancellable until %s", "row.nocancel": "Past the cancellation deadline", "toast.overlapauto": "Not created: it overlaps your %s · %s automation (%s).", "toast.overlapbook": "It overlaps your %s booking at %s.", "set.friends": "Friends", "set.friends.label": "Tell me when a friend books one of my usual classes", "set.friends.sub": "Same class and club, same weekday and time.", "att.title": "Did you go?", "att.sub": "Stats only count the classes you go to.", "att.yes": "Yes", "att.no": "No", "noshow.warn": "You skipped %d classes in the last 30 days without cancelling. At the third, Virgin may block your bookings for 15 days: cancel up to %d h before.", "stats.title": "Your activity", "stats.months": "Classes per month", "stats.bytype": "By type", "stats.slot": "Your class: <b>%s</b> · %s %s", "suggest.text": "You often go to <b>%s</b> · %s on %s at %s (%d times).", "suggest.auto": "Automate", "suggest.dismiss": "Not now", "outcome.overlap": "Overlap",
+    "row.cancelby": "Cancellable until %s", "row.nocancel": "Past the cancellation deadline", "toast.overlapauto": "Not created: it overlaps your %s · %s automation (%s).", "toast.overlapbook": "It overlaps your %s booking at %s.", "set.friends": "Friends", "set.friends.label": "Tell me when a friend books one of my usual classes", "set.friends.sub": "Same class and club, same weekday and time.", "att.title": "Did you go?", "att.sub": "Stats only count the classes you go to.", "att.yes": "Yes", "att.no": "No", "noshow.warn": "You skipped %d classes in the last 30 days without cancelling. At the third, Virgin may block your bookings for 15 days: cancel up to %d h before.", "stats.title": "Your activity", "stats.months": "Classes per month", "stats.bytype": "By type", "stats.slot": "Your class: <b>%s</b> · %s %s", "suggest.text": "You often go to <b>%s</b> · %s on %s at %s (%d times).", "suggest.auto": "Automate", "suggest.dismiss": "Not now", "outcome.overlap": "Overlap", "set.clubs": "Your clubs", "clubs.add": "Add a club…", "clubs.search": "Search club", "clubs.hint": "Up to %d clubs: the calendar shows their classes.", "clubs.home": "Your club", "clubs.max": "At most %d clubs", "clubs.last": "You need at least one club", "set.classes": "Classes", "set.classes.popular": "The popular ones", "set.classes.popular.sub": "Calisthenics, Pilates, Reformer, TRX, Cycle, Full Body, Lift and Solarium.", "set.classes.all": "All", "set.classes.all.sub": "Every class of your clubs: filter by type in the calendar.", "set.away": "Holidays", "away.hint": "On the days you pick I book nothing: automations stay and resume after.", "away.from": "From", "away.until": "Until", "away.save": "Save holidays", "away.on": "On holiday from <b>%s</b> to <b>%s</b>: I book nothing on those days.", "away.change": "Change dates", "away.clear": "Remove", "away.booked": "You already have these bookings on those days: cancel them if you won't go.", "toast.awayset": "Holidays saved ✓", "toast.awaycleared": "Holidays removed: booking again", "set.weekly": "Weekly summary", "set.weekly.label": "On Sunday evening, next week's classes", "set.weekly.sub": "Booked, on the waitlist and automations still without a spot.", "toast.cancelling": "Cancelling %s…", "toast.leaving": "Leaving the %s waitlist…", "action.undo": "Undo", "toast.undone": "Done: not cancelled", "cal.updating": "Updating the calendar…", "admin.backup": "Download a database copy", "admin.backup.hint": "It holds the sessions and the encrypted passwords: keep it somewhere safe.",
     "cancel.title": "Cancel this class?", "cancel.text": "You free the spot for someone else and it doesn't count as a no-show. You can cancel until %s.", "cancel.late": "The cancellation deadline passed at %s: Virgin may refuse it or count it as a no-show.", "cancel.yes": "Yes, cancel", "cancel.no": "No, I'm going", "cancel.gone": "That booking isn't in your bookings anymore.",
     "rel.today": "today", "rel.tomorrow": "tomorrow", "duration": "%d min",
   },
@@ -719,16 +744,25 @@ const payload = c => esc(JSON.stringify(c));
 const pref = {
   get(k) { try { return localStorage.getItem(`${k}:${myEmail}`); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(`${k}:${myEmail}`, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(`${k}:${myEmail}`); } catch (e) {} },
 };
 // setClub changes the club filter and remembers it (an explicit "All" included),
 // so the home club is only the default until the user picks something else.
 function setClub(v) { state.club = v; pref.set("club", v); }
 
 let toastTimer;
-function toast(msg, isErr, ms = 3500) {
+// toast shows a message; `action` ({label, fn}) adds a button to it (e.g. Undo).
+function toast(msg, isErr, ms = 3500, action) {
   const el = $("#toast");
   el.textContent = msg;
-  el.className = "show" + (isErr ? " err" : "");
+  if (action) {
+    const b = document.createElement("button");
+    b.className = "tact";
+    b.textContent = action.label;
+    b.onclick = () => { el.className = ""; action.fn(); };
+    el.append(b);
+  }
+  el.className = "show" + (isErr ? " err" : "") + (action ? " act" : "");
   clearTimeout(toastTimer); // a new toast gets its full time, not the previous one's leftover
   toastTimer = setTimeout(() => el.className = "", ms);
 }
@@ -741,12 +775,14 @@ function openSheet(id) {
 function closeSheets() {
   $("#sheetBg").classList.remove("open");
   document.querySelectorAll(".sheet.open").forEach(s => s.classList.remove("open"));
+  reloadIfClubsChanged();
 }
 // closeSheet closes one sheet (e.g. the instructor list over the filters),
 // keeping the backdrop while another one is still open.
 function closeSheet(id) {
   $("#" + id).classList.remove("open");
   if (!document.querySelector(".sheet.open")) $("#sheetBg").classList.remove("open");
+  if (id === "clubSheet") reloadIfClubsChanged();
 }
 
 // Swipe a sheet down to close it, like a native bottom sheet. The drag only
@@ -788,27 +824,61 @@ async function load() {
   await loadCalendar(token);
 }
 
+// The last calendar is kept on the device (per user, dropped on logout) so the
+// app opens with it at once while the live one loads. Until then it's read only:
+// spots and bookings may have changed.
+const CAL_CACHE_MAX = 12 * 3600e3;
+let calStale = false;
+
+function cachedCalendar() {
+  try {
+    const { at, days } = JSON.parse(pref.get("calendar"));
+    return Date.now() - at <= CAL_CACHE_MAX ? days : null;
+  } catch (e) { return null; }
+}
+
+function setCalendar(days, stale) {
+  const now = new Date();
+  all = [];
+  for (const d of (days || [])) all.push(...(d.classes || []).filter(c => !stale || classStart(c) > now));
+  calStale = stale;
+  if (state.date && !all.some(c => c.date === state.date)) state.date = ""; // that day is gone (midnight)
+  if (!stale) { // filters left over from other clubs or classes would hide everything
+    if (state.club && !all.some(c => c.club === state.club)) state.club = "";
+    for (const cat of state.cats) if (!all.some(c => classCategory(c.name) === cat)) state.cats.delete(cat);
+  }
+  populateFilters();
+  if (state.view === "calendar") render();
+}
+
 // loadCalendar fetches the whole calendar in ONE call (vapi accepts a range). The
 // browser keeps it in memory (`all`); switching tabs doesn't re-request it.
 async function loadCalendar(token) {
   all = [];
+  const cached = cachedCalendar();
+  if (cached) setCalendar(cached, true);
   // Only the calendar view shows its spinner: the calendar also loads behind
   // other views (a notification opening Bookings) and mustn't paint over them.
-  if (state.view === "calendar") $("#out").innerHTML = `<div class="loading">${t("loading.calendar2")}</div>`;
-  const res = await fetch(`/api/calendar?days=${DAYS}`);
+  else if (state.view === "calendar") $("#out").innerHTML = `<div class="loading">${t("loading.calendar2")}</div>`;
+  let res;
+  try { res = await fetch(`/api/calendar?days=${DAYS}`); }
+  catch (e) { res = null; }
   if (token !== loadToken) return;
-  if (res.status === 401) { showLogin(); return; }
-  if (!res.ok) { if (state.view === "calendar") $("#out").innerHTML = `<div class="empty">${t("error.calendar")}</div>`; return; }
+  if (res && res.status === 401) { showLogin(); return; }
+  if (!res || !res.ok) {
+    if (cached) return toast(t("error.calendar"), true); // keep showing the stored one
+    if (state.view === "calendar") $("#out").innerHTML = `<div class="empty">${t("error.calendar")}</div>`;
+    return;
+  }
   const { days } = await res.json();
-  for (const d of (days || [])) all.push(...(d.classes || []));
-  if (state.date && !all.some(c => c.date === state.date)) state.date = ""; // that day is gone (midnight)
-  populateFilters();
-  if (state.view === "calendar") render();
+  pref.set("calendar", JSON.stringify({ at: Date.now(), days }));
+  setCalendar(days, false);
 }
 
 // ---- calendar filters: day strip (single date) + filter sheet (class, Pilates type, club) ----
 
 function populateFilters() {
+  pref.set("cats", JSON.stringify([...state.cats])); // the class filter is remembered on this device
   populateDayStrip(all);
   populateClassChips(all);
   populatePilatesChips(all);
@@ -962,6 +1032,8 @@ function filteredClasses() {
 function render() {
   const onCal = state.view === "calendar";
   $("#controls").style.display = onCal ? "" : "none";
+  $("#out").classList.toggle("stale", onCal && calStale);
+  $("#out").dataset.stale = t("cal.updating");
   if (state.view === "automations") return renderAutomations();
   if (state.view === "bookings") return renderClasses(bookings, true);
   if (state.view === "shared") return renderShared();
@@ -1200,6 +1272,7 @@ function renderClasses(rows, isBookings) {
 async function loadAutomations() {
   try { autos = (await (await fetch("/api/automations")).json()) || []; } catch (e) {}
   try { watches = (await (await fetch("/api/watches")).json()) || []; } catch (e) {}
+  await loadAway();
   if (state.view === "automations") renderAutomations();
 }
 
@@ -1273,6 +1346,8 @@ function renderAdmin() {
     <div class="admin-section">
       <h3>${t("admin.engine")}</h3>
       <p class="hint" style="margin:0 4px">${engine}</p>
+      <a class="btn" href="/api/admin/backup" download style="margin:12px 4px 0">${t("admin.backup")}</a>
+      <p class="hint" style="margin:6px 4px 0">${t("admin.backup.hint")}</p>
     </div>
     <div class="admin-section">
       <h3>${t("admin.automations")}</h3>
@@ -1322,7 +1397,7 @@ const ordWeekday = w => (w === 0 ? 7 : w); // Monday→Sunday (Sunday last)
 
 function renderAutomations() {
   if (!autos.length) {
-    $("#out").innerHTML = `${watchesSection()}<div class="empty">${t("empty.autos")}</div>`;
+    $("#out").innerHTML = `${awayBanner()}${watchesSection()}<div class="empty">${t("empty.autos")}</div>`;
     return;
   }
   const cats = [...new Set(autos.map(r => classCategory(r.name)))];
@@ -1341,7 +1416,7 @@ function renderAutomations() {
     (state.autoCats.size === 0 || state.autoCats.has(classCategory(r.name))));
 
   if (!rows.length) {
-    $("#out").innerHTML = `${watchesSection()}${filters}<div class="empty">${t("empty.autos.filtered")}</div>`;
+    $("#out").innerHTML = `${awayBanner()}${watchesSection()}${filters}<div class="empty">${t("empty.autos.filtered")}</div>`;
     return;
   }
 
@@ -1354,7 +1429,7 @@ function renderAutomations() {
         <div class="auto-list">${list.map(autoCard).join("")}</div></section>`;
   }).join("");
 
-  $("#out").innerHTML = `${watchesSection()}${filters}${groups}<p class="hint">${t("auto.hint")}</p>`;
+  $("#out").innerHTML = `${awayBanner()}${watchesSection()}${filters}${groups}<p class="hint">${t("auto.hint")}</p>`;
 }
 
 function autoCard(r) {
@@ -1427,10 +1502,48 @@ async function refreshAfterAction() {
   if (state.view === "shared") loadShared();
 }
 
-async function act(kind, c) {
+function act(kind, c) {
+  return kind === "unbook" ? deferCancel(c) : send(kind, c);
+}
+
+// A cancellation waits UNDO_MS behind an Undo button before reaching Virgin, so a
+// mistaken tap costs nothing (booking again could find the spot taken). Leaving
+// the app sends it at once; so does a deadline too close to wait.
+const UNDO_MS = 5000;
+let pendingUnbook = null; // { c, timer }
+const sameClass = (a, b) => a.date === b.date && a.start === b.start && a.club === b.club && a.name === b.name;
+
+function deferCancel(c) {
+  if (pendingUnbook && sameClass(pendingUnbook.c, c)) return; // a second tap on the same one
+  flushCancel(); // one at a time: an earlier one goes now
+  if (cancelDeadline(c) - Date.now() < 2 * UNDO_MS) return send("unbook", c);
+  pendingUnbook = { c, timer: setTimeout(flushCancel, UNDO_MS) };
+  toast(t(c.waitlisted ? "toast.leaving" : "toast.cancelling", c.name), false, UNDO_MS,
+    { label: t("action.undo"), fn: undoCancel });
+}
+
+function undoCancel() {
+  if (!pendingUnbook) return;
+  clearTimeout(pendingUnbook.timer);
+  pendingUnbook = null;
+  toast(t("toast.undone"));
+}
+
+function flushCancel(keepalive = false) {
+  if (!pendingUnbook) return;
+  const { c, timer } = pendingUnbook;
+  clearTimeout(timer);
+  pendingUnbook = null;
+  send("unbook", c, keepalive);
+}
+// keepalive lets the request outlive the page (closing the app, switching to another).
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushCancel(true); });
+window.addEventListener("pagehide", () => flushCancel(true));
+
+async function send(kind, c, keepalive = false) {
   try {
     const res = await (await fetch(`/api/${kind}`, {
-      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c)
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(c), keepalive
     })).json();
     if (res.ok) {
       if (kind === "book" && res.waitlisted) toast(t("toast.waitlisted", res.position));
@@ -1584,6 +1697,7 @@ async function init() {
       if (me.cancelCutoffMin != null) cancelCutoffMin = me.cancelCutoffMin;
       const club = pref.get("club");
       state.club = club !== null ? club : (me.homeClub || ""); // home club until the user picks another
+      try { state.cats = new Set(JSON.parse(pref.get("cats")) || []); } catch (e) {}
       $("#user").textContent = myEmail;
       $("#avatar").textContent = $("#avatarLg").textContent = (myEmail[0] || "?").toUpperCase();
       if (me.isAdmin) $("#adminTab").style.display = "";
@@ -1637,12 +1751,14 @@ async function logout() {
       await sub.unsubscribe();
     }
   } catch (e) { /* best-effort */ }
+  flushCancel();
+  pref.del("calendar"); // someone else may sign in on this device
   await fetch("/api/logout", { method: "POST" });
   location.reload();
 }
 
 // ---- settings (account sheet) ----
-let settings = { reminderHours: 4, fullAction: "", friendNotify: true };
+let settings = { reminderHours: 4, fullAction: "", friendNotify: true, weeklySummary: true, allClasses: false };
 
 async function loadSettings() {
   try { settings = await (await fetch("/api/settings")).json(); } catch (e) {}
@@ -1652,9 +1768,14 @@ async function loadSettings() {
 function renderSettings() {
   $("#reminderChips").innerHTML = [0, 4, 6, 12, 24]
     .map(h => `<button class="chip${settings.reminderHours === h ? " active" : ""}" onclick="saveSettings({ reminderHours: ${h} })">${h ? t("set.hours", h) : t("set.off")}</button>`).join("");
-  $("#friendBox").innerHTML = `<button class="opt${settings.friendNotify ? " active" : ""}" role="switch" aria-checked="${!!settings.friendNotify}"
-      onclick="saveSettings({ friendNotify: ${!settings.friendNotify} })"><span class="switch${settings.friendNotify ? " on" : ""}" style="height:auto;padding:0"><span class="track"></span></span>
-      <span><b>${t("set.friends.label")}</b><small>${t("set.friends.sub")}</small></span></button>`;
+  const toggle = (field, key) => { const on = !!settings[field]; return `<button class="opt${on ? " active" : ""}" role="switch" aria-checked="${on}"
+      onclick="saveSettings({ ${field}: ${!on} })"><span class="switch${on ? " on" : ""}" style="height:auto;padding:0"><span class="track"></span></span>
+      <span><b>${t(key + ".label")}</b><small>${t(key + ".sub")}</small></span></button>`; };
+  $("#friendBox").innerHTML = toggle("friendNotify", "set.friends");
+  $("#weeklyBox").innerHTML = toggle("weeklySummary", "set.weekly");
+  $("#classOpts").innerHTML = [[false, "set.classes.popular"], [true, "set.classes.all"]]
+    .map(([v, k]) => `<button class="opt${!!settings.allClasses === v ? " active" : ""}" role="radio" aria-checked="${!!settings.allClasses === v}"
+        onclick="saveSettings({ allClasses: ${v} })"><span class="dot"></span><span><b>${t(k)}</b><small>${t(k + ".sub")}</small></span></button>`).join("");
   const cutoffH = Math.round((settings.watchCutoffMin || 180) / 60);
   $("#fullChips").innerHTML = [["", "set.full.notify"], ["waitlist", "set.full.waitlist"], ["watch", "set.full.watch"]]
     .map(([v, k]) => `<button class="opt${settings.fullAction === v ? " active" : ""}" role="radio" aria-checked="${settings.fullAction === v}"
@@ -1666,9 +1787,123 @@ async function saveSettings(patch) {
     const res = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...settings, ...patch }) });
     if (!res.ok) throw new Error(await res.text());
+    const before = settings.allClasses;
     settings = { ...settings, ...(await res.json()) }; // PUT echoes only the editable fields
     renderSettings();
     toast(t("toast.saved"));
+    if (settings.allClasses !== before) load(); // another set of classes
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+}
+
+// ---- the user's clubs (account sheet + searchable picker) ----
+let clubs = { all: [], mine: [], home: 0, max: 5 }, clubsDirty = false;
+const clubName = id => (clubs.all.find(c => c.id === id) || {}).name || "";
+
+async function loadClubs() {
+  try { clubs = await (await fetch("/api/clubs")).json(); } catch (e) {}
+  renderMyClubs();
+}
+
+function renderMyClubs() {
+  $("#myClubChips").innerHTML = clubs.mine.map(id => clubs.mine.length > 1
+      ? `<button class="fchip" onclick="toggleClub(${id})">${esc(clubName(id))}${icon("i-x")}</button>`
+      : `<span class="fchip">${esc(clubName(id))}</span>`).join("") +
+    (clubs.mine.length < clubs.max ? `<button class="chip" onclick="openClubPicker()">${t("clubs.add")}</button>` : "");
+}
+
+function openClubPicker() {
+  $("#clubSearch").value = "";
+  $("#clubHint").textContent = t("clubs.hint", clubs.max);
+  renderClubList();
+  openSheet("clubSheet");
+}
+
+function renderClubList() {
+  const norm = x => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const q = norm($("#clubSearch").value.trim());
+  // The ones followed first, then by name.
+  const list = clubs.all.filter(c => !q || norm(c.name).includes(q))
+    .sort((a, b) => (clubs.mine.includes(b.id) - clubs.mine.includes(a.id)) || a.name.localeCompare(b.name));
+  $("#clubList").innerHTML = list.map(c => `<div class="irow${clubs.mine.includes(c.id) ? " on" : ""}">
+      <button class="pick" onclick="toggleClub(${c.id})"><span class="box">${icon("i-check")}</span><span>${esc(c.name)}</span></button>
+      ${c.id === clubs.home ? `<span class="tag">${t("clubs.home")}</span>` : ""}</div>`).join("");
+}
+
+async function toggleClub(id) {
+  const on = !clubs.mine.includes(id);
+  if (on && clubs.mine.length >= clubs.max) return toast(t("clubs.max", clubs.max), true);
+  if (!on && clubs.mine.length === 1) return toast(t("clubs.last"), true);
+  const next = on ? [...clubs.mine, id] : clubs.mine.filter(x => x !== id);
+  try {
+    const res = await fetch("/api/clubs", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clubs: next }) });
+    if (!res.ok) throw new Error(await res.text());
+    clubs = await res.json();
+    clubsDirty = true;
+    renderMyClubs();
+    if ($("#clubSheet").classList.contains("open")) renderClubList();
+    else reloadIfClubsChanged(); // removed from the account sheet: no picker to close
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+}
+
+// The calendar is reloaded once the picker closes, not on every tap.
+function reloadIfClubsChanged() {
+  if (!clubsDirty) return;
+  clubsDirty = false;
+  load();
+}
+
+// ---- holidays (account sheet, banner in Automations) ----
+let away = { from: "", until: "", bookings: [] }, awayEditing = false;
+
+async function loadAway() {
+  try { away = await (await fetch("/api/away")).json(); } catch (e) {}
+}
+
+const fmtShort = ymd => new Date(ymd + "T00:00").toLocaleDateString(loc(), { day: "numeric", month: "long" });
+
+function awayBanner() {
+  if (!away.from) return "";
+  return `<div class="awaybar">${icon("i-hourglass")}<span>${t("away.on", fmtShort(away.from), fmtShort(away.until))}</span></div>`;
+}
+
+function renderAway() {
+  const box = $("#awayBox");
+  if (away.from && !awayEditing) {
+    const booked = away.bookings.length
+      ? `<p>${t("away.booked")}</p><ul>${away.bookings.map(b => `<li>${esc(b.name)} · ${fmtShort(b.date)} ${b.start}</li>`).join("")}</ul>` : "";
+    box.innerHTML = `<p>${t("away.on", fmtShort(away.from), fmtShort(away.until))}</p>${booked}
+      <div class="row"><button class="btn" onclick="awayEditing = true; renderAway()">${t("away.change")}</button>
+      <button class="btn btn-danger" onclick="clearAway()">${t("away.clear")}</button></div>`;
+    return;
+  }
+  const today = new Date().toLocaleDateString("sv");
+  box.innerHTML = `<p>${t("away.hint")}</p>
+    <div class="dates"><div class="field"><label for="awayFrom">${t("away.from")}</label><input type="date" id="awayFrom" min="${today}" value="${away.from || today}"></div>
+    <div class="field"><label for="awayUntil">${t("away.until")}</label><input type="date" id="awayUntil" min="${today}" value="${away.until}"></div></div>
+    <button class="btn" onclick="saveAway()">${t("away.save")}</button>`;
+}
+
+async function saveAway() {
+  const from = $("#awayFrom").value, until = $("#awayUntil").value;
+  try {
+    const res = await fetch("/api/away", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, until }) });
+    if (!res.ok) throw new Error(await res.text());
+    away = await res.json();
+    awayEditing = false;
+    renderAway();
+    toast(t("toast.awayset"));
+    loadAutomations(); // next attempts move past the holidays
+  } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
+}
+
+async function clearAway() {
+  try {
+    const res = await fetch("/api/away", { method: "DELETE" });
+    if (!res.ok) throw new Error(await res.text());
+    away = await res.json();
+    renderAway();
+    toast(t("toast.awaycleared"));
+    loadAutomations();
   } catch (e) { toast(t("toast.error") + ": " + e.message, true); }
 }
 

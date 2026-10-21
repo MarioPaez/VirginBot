@@ -243,6 +243,7 @@ func (s *Server) pollWatchGroup(club, date string, watches []watch, errs map[str
 	if err != nil {
 		return
 	}
+	s.ensureClubs(watches[0].UserID) // a club VirginBot didn't start with has no name before
 	clubID, ok := calendar.ClubIDByName(club)
 	if !ok {
 		return

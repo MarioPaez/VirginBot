@@ -31,9 +31,10 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 ## Features
 
 **Calendar**
-- Live classes for the next 10 days across the configured clubs (Milano Corso Como, Milano Cavour, Palermo), with real availability: spots left, full ("Full · 3 waiting"), or when booking opens for *you* ("Opens Mon 18:15").
+- Live classes for the next 10 days in **your clubs** (up to 5 of Virgin's 42 in Italy, your home club by default), either the popular ones (Calisthenics, Pilates, TRX, Cycle, Full Body, Lift, Solarium) or every class, with real availability: spots left, full ("Full · 3 waiting"), or when booking opens for *you* ("Opens Mon 18:15").
 - A date strip to jump to a day, plus a filter sheet: class, Pilates variant, club (your home club by default) and instructor, with a searchable list where you star your favourite instructors.
-- Book and cancel in one tap. Every booking shows until when it can still be cancelled (Virgin allows it up to 2 h before the class).
+- Book and cancel in one tap. Every booking shows until when it can still be cancelled (Virgin allows it up to 2 h before the class). A cancellation waits a few seconds behind an **Undo** button before it reaches Virgin.
+- Opens instantly with the last calendar kept on the device, read only until the live one loads.
 - **Waitlists:** join a full class's waitlist in one tap, see your position, and get a push notification the moment you're moved into the class.
 - **Watch** a full class: VirginBot checks it every few minutes and books it as soon as a spot frees up, until 3 h before the class so you can still cancel it.
 
@@ -43,6 +44,7 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 - An automation that would overlap another one of yours is refused, saying which one it clashes with, and the bot never books a class that overlaps one you already have.
 - If a class is still full 24 h before, it can just tell you, put you on its waitlist, or keep watching it for you (your choice).
 - Cancelling one booking keeps the automation and only skips that date. Pause or remove any rule; each one shows its next attempt and the class it will book.
+- **Holidays:** pick the days you're away and nothing is booked on them; the rules stay and resume after, and the bookings you already have in those days are listed so you can cancel them.
 
 **Bookings and stats**
 - **"Did you go?"** after each class, with one tap. Virgin doesn't expose attendance, so this is what makes the stats real.
@@ -51,12 +53,12 @@ VirginBot fixes that. You mark the weekly classes you care about, the bot wakes 
 - Suggestions to automate the weekly classes you keep going to.
 
 **Everything else**
-- **Push notifications:** booked, couldn't book, a spot freed up, you're in from the waitlist, a reminder before each class (4 h by default) that opens a one-tap cancel confirmation for that booking, a friend booking one of your usual classes, and your Virgin password stopping working. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
+- **Push notifications:** booked, couldn't book, a spot freed up, you're in from the waitlist, a reminder before each class (4 h by default) that opens a one-tap cancel confirmation for that booking, a friend booking one of your usual classes, the club cancelling a class you booked, moving it or changing its instructor, a Sunday evening summary of next week (booked, waitlisted and automations still without a spot), and your Virgin password stopping working. Works on iPhone (iOS 16.4+, from the home-screen app) and Android.
 - **Who's going:** see who else booked a class, and book, automate or watch it from there.
 - **Phone calendar:** a private `.ics` subscription link with your bookings.
 - **Installable app:** add it to the home screen for a full-screen app with its own icon. You stay signed in, and the browser offers to save your password.
-- **Multi-user:** an email allowlist, Virgin passwords encrypted at rest, and per-user sessions.
-- **Admin view:** every user's automations and bookings, the engine's health and its latest booking attempts with their outcome.
+- **Multi-user:** an email allowlist, Virgin passwords encrypted at rest, and per-user sessions. Virgin sessions are renewed with their refresh token, so the password is only used to sign in again every 14 days.
+- **Admin view:** every user's automations and bookings, the engine's health and its latest booking attempts with their outcome, and a one-tap download of a consistent copy of the database (an off-site backup on top of Fly's daily volume snapshots).
 - **Three languages:** the web app and notifications are in Italian, Spanish and English.
 - **Mobile first:** bottom navigation, bottom sheets you can swipe down, large touch targets and safe-area aware layouts.
 
@@ -141,13 +143,9 @@ fly deploy -a <name>
 
 The engine has to run 24/7, so the machine can't scale to zero. Any always-on box at home (behind a Cloudflare Tunnel, for example) works just as well.
 
-## Adding a club
+## Clubs and classes
 
-Clubs are identified by vapi's numeric `clubId`. `GET /clubs`, with a signed-in user's token, lists every club in Italy.
-
-1. Add the id and display name in [`calendar/calendar.go`](calendar/calendar.go).
-2. Add it to the `clubs` list in [`main.go`](main.go).
-3. If the club needs its own class selection, adjust the `keep` filter there.
+Every club vapi lists (`GET /clubs`, all of Italy) can be picked from the account sheet; nothing to configure. The `clubs` list in [`main.go`](main.go) is only the fallback for members whose home club is unknown, and the `keep` filter there defines the "popular classes" choice. The three clubs in [`calendar/calendar.go`](calendar/calendar.go) keep their names fixed because stored bookings and rules are keyed by them.
 
 ## Security
 

@@ -84,3 +84,42 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(out, in)
 	return err
 }
+
+// Members from before per-member clubs keep the three clubs everyone saw; a
+// fresh install starts empty (each member's home club).
+func TestMigrateSeedsClubs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Turn it into a database from before the column existed.
+	for _, q := range []string{
+		`INSERT INTO users (id, email, pass, created) VALUES (1, 'a@x', x'00', '')`,
+		`ALTER TABLE users DROP COLUMN clubs`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	d.Close()
+	if d, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var clubs string
+	d.QueryRow(`SELECT clubs FROM users WHERE id = 1`).Scan(&clubs)
+	if clubs != "209,224,231" {
+		t.Fatalf("old member's clubs %q", clubs)
+	}
+	d.Exec(`INSERT INTO users (id, email, pass, created) VALUES (2, 'b@x', x'00', '')`)
+	d.Close()
+	if d, err = Open(path); err != nil { // reopening seeds nobody else
+		t.Fatal(err)
+	}
+	defer d.Close()
+	d.QueryRow(`SELECT clubs FROM users WHERE id = 2`).Scan(&clubs)
+	if clubs != "" {
+		t.Fatalf("new member's clubs %q", clubs)
+	}
+}

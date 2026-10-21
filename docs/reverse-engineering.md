@@ -40,12 +40,14 @@ The app talks to **`vapi.virginactive.com/vapi/2.1.0/`** — a clean JSON REST A
 | Action | Call |
 |---|---|
 | Login | `POST /sessions` `{memberId, password}` + `x-api-key` → `{token, refreshToken}` |
+| Refresh | `PATCH /sessions` with the **refresh token** as `x-auth-token`, empty body → new `{token, refreshToken}` |
+| Clubs | `GET /clubs` → every club in the region (`id`, `name`, address, hours…) |
 | Calendar | `GET /clubs/{clubId}/classes?startDate=&endDate=` |
 | My bookings | `GET /member/bookings?startDate=&endDate=` |
 | **Book** | `POST /clubs/{clubId}/classes/{classId}/sessions/{sessionId}?date=YYYY-MM-DD` (empty body) |
 | **Cancel** | `DELETE /member/bookings/sessions/{sessionId}?date=&bookingId=&clubId=&scheduledSessionId={classId}` |
 
-Auth is two headers: a **static app key** (`x-api-key`, the same for every install — extracted from the app) and a per-user **JWT** (`x-auth-token`) from the login, valid ~2 h. The calendar JSON even includes real availability (`bookableStatus`, `bookingCount`/`bookingCapacity`) — no more parsing buttons.
+Auth is two headers: a **static app key** (`x-api-key`, the same for every install — extracted from the app) and a per-user **JWT** (`x-auth-token`) from the login, valid ~2 h. The refresh token lasts 14 days from the login and refreshing doesn't extend it; the app was never seen refreshing (it logs in again), so the `PATCH` was found by probing in Oct 2026. The calendar JSON even includes real availability (`bookableStatus`, `bookingCount`/`bookingCapacity`) — no more parsing buttons.
 
 ## Act 5 — The migration
 

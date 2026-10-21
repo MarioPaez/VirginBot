@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -73,6 +75,34 @@ func (s *Store) Get(userID int64) (email, pass string, ok bool) {
 		return "", "", false
 	}
 	return email, pt, true
+}
+
+// RefreshToken returns the user's stored vapi refresh token ("" = none).
+func (s *Store) RefreshToken(userID int64) string {
+	var enc []byte
+	if s.db.QueryRow(`SELECT refresh FROM users WHERE id = ?`, userID).Scan(&enc) != nil || len(enc) == 0 {
+		return ""
+	}
+	tok, err := s.decrypt(enc)
+	if err != nil {
+		return ""
+	}
+	return tok
+}
+
+// SetRefreshToken stores the user's vapi refresh token, encrypted like the
+// password: it opens sessions without it for ~14 days, so restarts and expired
+// tokens don't cost a login each ("" clears it).
+func (s *Store) SetRefreshToken(userID int64, tok string) error {
+	var enc []byte
+	if tok != "" {
+		var err error
+		if enc, err = s.encrypt(tok); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.Exec(`UPDATE users SET refresh = ? WHERE id = ?`, enc, userID)
+	return err
 }
 
 // Email returns a user's email (or "").
@@ -161,19 +191,108 @@ func (s *Store) FriendNotify(userID int64) bool {
 	return on != 0
 }
 
-// SetPrefs stores the user's notification preferences (reminderHours 0 = off).
-func (s *Store) SetPrefs(userID int64, reminderHours int, fullAction string, friendNotify bool) error {
-	stored := reminderHours
+// Away returns the user's holidays (YYYY-MM-DD, both included), "" if none set.
+func (s *Store) Away(userID int64) (from, until string) {
+	s.db.QueryRow(`SELECT away_from, away_until FROM users WHERE id = ?`, userID).Scan(&from, &until)
+	return from, until
+}
+
+// SetAway sets the user's holidays ("", "" clears them).
+func (s *Store) SetAway(userID int64, from, until string) error {
+	_, err := s.db.Exec(`UPDATE users SET away_from = ?, away_until = ? WHERE id = ?`, from, until, userID)
+	return err
+}
+
+// IsAway reports whether date (YYYY-MM-DD) falls in the user's holidays: no
+// automated bookings then.
+func (s *Store) IsAway(userID int64, date string) bool {
+	from, until := s.Away(userID)
+	return from != "" && from <= date && date <= until
+}
+
+// WeeklySummary reports whether the user wants the Sunday evening push with
+// next week's classes (on by default).
+func (s *Store) WeeklySummary(userID int64) bool {
+	on := 1
+	s.db.QueryRow(`SELECT weekly_summary FROM users WHERE id = ?`, userID).Scan(&on)
+	return on != 0
+}
+
+// ClaimWeekly records that the summary of the week starting after `sunday` is
+// going out, and reports false if it already did (a restart mustn't send it twice).
+func (s *Store) ClaimWeekly(userID int64, sunday string) bool {
+	res, err := s.db.Exec(`UPDATE users SET weekly_sent = ? WHERE id = ? AND weekly_sent <> ?`, sunday, userID, sunday)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
+// Prefs are the user's settings edited together in the account sheet.
+type Prefs struct {
+	ReminderHours int // 0 = off
+	FullAction    string
+	FriendNotify  bool
+	WeeklySummary bool
+	AllClasses    bool // every class of their clubs, not only the popular ones
+}
+
+// Prefs returns the user's settings.
+func (s *Store) Prefs(userID int64) Prefs {
+	return Prefs{
+		ReminderHours: s.ReminderHours(userID), FullAction: s.FullAction(userID),
+		FriendNotify: s.FriendNotify(userID), WeeklySummary: s.WeeklySummary(userID), AllClasses: s.AllClasses(userID),
+	}
+}
+
+// SetPrefs stores the user's settings.
+func (s *Store) SetPrefs(userID int64, p Prefs) error {
+	stored := p.ReminderHours
 	if stored == 0 {
 		stored = -1 // explicitly off, unlike 0 = never chosen
 	}
-	f := 0
-	if friendNotify {
-		f = 1
-	}
-	_, err := s.db.Exec(`UPDATE users SET reminder_hours = ?, full_action = ?, friend_notify = ? WHERE id = ?`,
-		stored, fullAction, f, userID)
+	_, err := s.db.Exec(`UPDATE users SET reminder_hours = ?, full_action = ?, friend_notify = ?, weekly_summary = ?, all_classes = ?
+		WHERE id = ?`, stored, p.FullAction, boolInt(p.FriendNotify), boolInt(p.WeeklySummary), boolInt(p.AllClasses), userID)
 	return err
+}
+
+// AllClasses reports whether the user sees every class of their clubs (else
+// only the popular ones VirginBot curates).
+func (s *Store) AllClasses(userID int64) bool {
+	var on int
+	s.db.QueryRow(`SELECT all_classes FROM users WHERE id = ?`, userID).Scan(&on)
+	return on != 0
+}
+
+// Clubs returns the clubs the user follows (nil = never chosen).
+func (s *Store) Clubs(userID int64) []int {
+	var raw string
+	s.db.QueryRow(`SELECT clubs FROM users WHERE id = ?`, userID).Scan(&raw)
+	var out []int
+	for _, f := range strings.Split(raw, ",") {
+		if id, err := strconv.Atoi(strings.TrimSpace(f)); err == nil && id > 0 {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// SetClubs stores the clubs the user follows.
+func (s *Store) SetClubs(userID int64, clubs []int) error {
+	ids := make([]string, len(clubs))
+	for i, id := range clubs {
+		ids[i] = strconv.Itoa(id)
+	}
+	_, err := s.db.Exec(`UPDATE users SET clubs = ? WHERE id = ?`, strings.Join(ids, ","), userID)
+	return err
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // CredsAlerted reports whether the user was told their stored Virgin password

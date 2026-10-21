@@ -5,6 +5,7 @@ package vapi
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +19,17 @@ import (
 	"github.com/MarioPaez/VirginBot/calendar"
 )
 
+// base is a var only so tests can point the client at a local server.
+var base = "https://vapi.virginactive.com/vapi/2.1.0"
+
+// SetBaseURL points the client at another server and returns the undo. Tests only.
+func SetBaseURL(u string) (restore func()) {
+	old := base
+	base = u
+	return func() { base = old }
+}
+
 const (
-	base       = "https://vapi.virginactive.com/vapi/2.1.0"
 	appID      = "2BoKHJPfAB"
 	appVersion = "7.3.11 (726042304)"
 	region     = "ITA"
@@ -52,19 +62,85 @@ func (e *StatusError) Error() string {
 }
 
 // Client calls the API with the app's static API key + the user's session token.
+// A client is never mutated after it's built (it's shared by concurrent calls):
+// refreshing makes a new one.
 type Client struct {
-	http   *http.Client
-	apiKey string
-	token  string
+	http    *http.Client
+	apiKey  string
+	token   string
+	refresh string // refresh token: ~14 days from the login, not extended by refreshing
+}
+
+// session is the answer of a login or a refresh.
+type session struct {
+	Token        string `json:"token"`
+	RefreshToken string `json:"refreshToken"`
+}
+
+func newClient(apiKey string) *Client {
+	return &Client{http: &http.Client{Timeout: 30 * time.Second}, apiKey: apiKey}
+}
+
+// ErrRefreshExpired: the refresh token is past its expiry; only a login helps.
+var ErrRefreshExpired = errors.New("vapi: refresh token expired")
+
+// RefreshToken returns the token that renews this session without the password.
+func (c *Client) RefreshToken() string { return c.refresh }
+
+// Resume opens a new session from a refresh token (PATCH /sessions with the
+// refresh token as x-auth-token and no body, found by probing in Oct 2026: the
+// app itself was never seen doing it). The new session's refresh token keeps
+// the original expiry. Any failure is reported as a plain error, never as
+// ErrClientRejected: a bad refresh token gets the gateway's 401 shape, which
+// would otherwise read as Virgin rejecting the whole app.
+func Resume(apiKey, refreshToken string) (*Client, error) {
+	if exp, ok := TokenExpiry(refreshToken); ok && !time.Now().Before(exp) {
+		return nil, ErrRefreshExpired
+	}
+	rc := newClient(apiKey)
+	rc.token = refreshToken
+	var out session
+	if err := rc.do(http.MethodPatch, "/sessions", nil, nil, &out); err != nil {
+		if errors.Is(err, ErrClientRejected) || errors.Is(err, ErrUnauthorized) {
+			return nil, errors.New("vapi refresh: rejected (expired or revoked)")
+		}
+		return nil, fmt.Errorf("vapi refresh: %w", err)
+	}
+	if out.Token == "" {
+		return nil, fmt.Errorf("vapi refresh: response without token")
+	}
+	c := newClient(apiKey)
+	c.token, c.refresh = out.Token, out.RefreshToken
+	if c.refresh == "" {
+		c.refresh = refreshToken // still valid: keep using it
+	}
+	return c, nil
+}
+
+// TokenExpiry reads the exp claim of a JWT, without verifying it (it's only
+// used to skip a refresh that can't work).
+func TokenExpiry(tok string) (time.Time, bool) {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if json.Unmarshal(payload, &claims) != nil || claims.Exp == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(claims.Exp, 0), true
 }
 
 // Login creates a session (POST /sessions) and stores the user's token.
 func Login(apiKey, email, pass string) (*Client, error) {
-	c := &Client{http: &http.Client{Timeout: 30 * time.Second}, apiKey: apiKey}
-	var out struct {
-		Token        string `json:"token"`
-		RefreshToken string `json:"refreshToken"`
-	}
+	c := newClient(apiKey)
+	var out session
 	body := map[string]string{"memberId": email, "password": pass}
 	if err := c.do(http.MethodPost, "/sessions", nil, body, &out); err != nil {
 		if errors.Is(err, ErrUnauthorized) {
@@ -77,7 +153,7 @@ func Login(apiKey, email, pass string) (*Client, error) {
 	if out.Token == "" {
 		return nil, fmt.Errorf("vapi login: response without token")
 	}
-	c.token = out.Token
+	c.token, c.refresh = out.Token, out.RefreshToken
 	return c, nil
 }
 
@@ -138,7 +214,7 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 			start := hhmm(k.ClassTime)
 			out = append(out, calendar.Class{
 				Date: ad.Date, Start: start, End: addMinutes(start, k.SessionDuration),
-				Name: k.Name, Club: calendar.ClubNames[clubID], Studio: k.StudioName,
+				Name: k.Name, Club: calendar.ClubName(clubID), Studio: k.StudioName,
 				Instructor: instructorsOf(k.Instructors),
 				ClubID:     clubID, ClassID: k.ID, SessionID: k.SessionID,
 				Status: mapStatus(k.BookableStatus),
@@ -146,6 +222,15 @@ func (c *Client) Classes(clubID int, start, end time.Time) ([]calendar.Class, er
 				WaitlistCount: k.WaitlistCount, WaitlistCap: k.WaitlistCap,
 			})
 		}
+	}
+	return out, nil
+}
+
+// Clubs lists every club in the region (GET /clubs).
+func (c *Client) Clubs() ([]calendar.Club, error) {
+	var out []calendar.Club
+	if err := c.do(http.MethodGet, "/clubs", nil, nil, &out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -221,7 +306,7 @@ func (c *Client) MyBookings(start, end time.Time) ([]calendar.Class, error) {
 		start := hhmm(b.Class.ClassTime)
 		c := calendar.Class{
 			Date: b.BookingDate, Start: start, End: addMinutes(start, b.Class.SessionDuration),
-			Name: b.Class.Name, Club: calendar.ClubNames[b.Class.ClubID],
+			Name: b.Class.Name, Club: calendar.ClubName(b.Class.ClubID),
 			Instructor: instructorsOf(b.Class.Instructors),
 			ClubID:     b.Class.ClubID, ClassID: b.Class.ID, SessionID: b.Class.SessionID,
 			BookingID: b.ID, Booked: true, Status: "booked",
