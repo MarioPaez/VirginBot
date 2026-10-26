@@ -97,9 +97,10 @@ func movedTo(o calendar.Class, fresh map[string]calendar.Class) (calendar.Class,
 	return calendar.Class{}, false
 }
 
-// notifyChanges pushes what Virgin changed. A vanished booking is only news if
-// the club dropped the class: if it's still in the club's schedule, the user
-// cancelled it from the official app (or from here, a moment before this sync).
+// notifyChanges pushes what Virgin changed. A vanished booking is news for the
+// user only if the club dropped the class: if it's still in the club's schedule,
+// the user cancelled it from the official app (or from here, a moment before
+// this sync), which is news for the friends told they were going.
 func (s *Server) notifyChanges(userID int64, ch bookingChanges) {
 	if s.push == nil {
 		return // nobody to tell: skip the schedule checks too
@@ -114,6 +115,7 @@ func (s *Server) notifyChanges(userID int64, ch bookingChanges) {
 	}
 	for _, c := range ch.vanished {
 		if !s.droppedByClub(userID, c) {
+			s.notifyFriendLeft(userID, c) // cancelled by the user
 			continue
 		}
 		log.Printf("changes: u%d %s · %s %s %s cancelled by the club", userID, c.Name, c.Club, c.Date, c.Start)

@@ -773,6 +773,7 @@ func (s *Server) handleUnbook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deleteBooking(userID, req.Name, req.Club, req.Date, req.Start)
+	go s.notifyFriendLeft(userID, calendar.Class{Name: req.Name, Club: req.Club, Date: req.Date, Start: req.Start})
 	s.forgetEngineState(userID, req)
 	// Keep the (recurring) rule but don't let the engine re-book this date; the FE
 	// tells the user (skipped=true). A one-off rule for this date has nothing
