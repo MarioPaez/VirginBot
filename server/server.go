@@ -512,6 +512,13 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 	moved := map[string]bool{}
 	for _, m := range changes.moved {
 		moved[bookingKey(m.to)] = true
+		// Friends told about it follow it to the new time, both ways (a mark
+		// already there wins), or dropping it later would tell nobody.
+		if _, err := tx.Exec(`UPDATE OR IGNORE friend_notified SET date = ?, start = ?
+			WHERE (user_id = ? OR friend_id = ?) AND name = ? AND club = ? AND date = ? AND start = ?`,
+			m.to.Date, m.to.Start, userID, userID, m.from.Name, m.from.Club, m.from.Date, m.from.Start); err != nil {
+			log.Printf("reconcile (friend marks) u%d: %v", userID, err)
+		}
 	}
 	// What's new is only news if we knew the user's bookings before: something
 	// stored, or an earlier sync since start (a first sync isn't news).

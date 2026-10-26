@@ -72,3 +72,26 @@ func TestFriendNotices(t *testing.T) {
 		t.Fatalf("Mario told after leaving: %v", got)
 	}
 }
+
+// When Virgin moves a class, the friend marks follow it: dropping it at the new
+// time still tells whoever heard.
+func TestFriendMarksFollowMovedClass(t *testing.T) {
+	s := testServer(t)
+	s.store = automation.NewStore(s.db)
+	for id, email := range map[int64]string{1: "mario@x", 2: "nikko@x"} {
+		s.db.Exec(`INSERT INTO users (id, email, pass, created) VALUES (?, ?, x'00', '')`, id, email)
+	}
+	day := time.Now().In(s.loc).AddDate(0, 0, 2).Format("2006-01-02")
+	c := calendar.Class{Name: "Calisthenics", Club: "Milano Cavour", Date: day, Start: "18:30", BookingID: 7, Booked: true}
+	s.reconcileBookings(1, day, day, []calendar.Class{c})
+	if got := s.friendsBooked(2, c); len(got) != 2 {
+		t.Fatalf("booked = %v", got)
+	}
+
+	moved := c
+	moved.Start = "19:00"
+	s.reconcileBookings(1, day, day, []calendar.Class{moved})
+	if got := s.friendsLeft(2, moved); !reflect.DeepEqual(got, []friendNotice{{to: 1, about: 2}}) {
+		t.Fatalf("left at the new time = %v", got)
+	}
+}
