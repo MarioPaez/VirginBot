@@ -567,9 +567,10 @@ func (s *Server) reconcileBookings(userID int64, start, end string, booked []cal
 	for _, c := range promoted {
 		s.notifyPromoted(userID, c)
 	}
-	if len(fresh) > 0 {
+	// Getting in from the waitlist is news for friends like a new booking.
+	if tell := append(fresh, promoted...); len(tell) > 0 {
 		go func() {
-			for _, c := range fresh {
+			for _, c := range tell {
 				s.notifyFriends(userID, c)
 			}
 		}()
