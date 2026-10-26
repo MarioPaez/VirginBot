@@ -250,7 +250,7 @@
 
   /* ---- Bottom sheets (filters, account) ---- */
   .sheet-bg { position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .2s; }
-  .sheet { position:fixed; left:0; right:0; bottom:0; z-index:21; max-height:85vh; overflow-y:auto; background:var(--surface);
+  .sheet { position:fixed; left:0; right:0; bottom:0; z-index:21; max-height:85vh; overflow-y:auto; overflow-x:hidden; background:var(--surface);
            border-top:1px solid var(--line-2); border-radius:22px 22px 0 0; padding:8px 16px calc(16px + var(--safe-b));
            transform:translateY(100%); transition:transform .25s cubic-bezier(.2,.8,.2,1); }
   .sheet.open { transform:none; }
@@ -274,8 +274,11 @@
   .pushbox .on svg.i { width:16px; height:16px; stroke-width:2.6; }
   .pushbox .row { display:flex; gap:8px; }
   .pushbox .row .btn { flex:1; }
-  .dates { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .dates .field input { height:44px; width:100%; min-width:0; }
+  /* iOS gives date inputs an intrinsic width: let the columns shrink below it. */
+  .dates { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
+  .dates .field { min-width:0; grid-template-columns:minmax(0, 1fr); }
+  .dates .field input { height:44px; width:100%; min-width:0; -webkit-appearance:none; appearance:none; text-align:left; }
+  .dates .field input::-webkit-date-and-time-value { text-align:left; }
   .pushbox ul { margin:0; padding-left:18px; color:var(--muted); font-size:13.5px; line-height:1.5; }
   .awaybar { display:flex; align-items:center; gap:10px; margin:0 0 12px; padding:12px 14px; border-radius:14px;
              background:var(--surface-2); color:var(--muted); font-size:13.5px; line-height:1.45; }
