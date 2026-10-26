@@ -630,6 +630,7 @@ func (s *Server) purgePastBookings() {
 	}
 	s.store.PurgeEngine(s.today(), attemptsKept)
 	s.db.Exec(`DELETE FROM reminders_sent WHERE date < ?`, s.today())
+	s.db.Exec(`DELETE FROM friend_notified WHERE date < ?`, s.today())
 }
 
 // unskip clears a cancelled-occurrence mark once the user books or automates it again.
